@@ -1,0 +1,126 @@
+@import "tailwindcss";
+@source "../app";
+@source "../lib";
+
+@layer base {
+  :root {
+    --primary: #21B225;
+    --primary-dim: #1a8e1d;
+    --on-primary: #ffffff;
+    --secondary: #6366f1;
+    --on-secondary: #ffffff;
+    --tertiary: #f59e0b;
+    --on-tertiary: #ffffff;
+    --error: #f43f5e;
+    --on-error: #ffffff;
+    --surface: #0f1117;
+    --on-surface: #e8eaed;
+    --on-surface-variant: #9aa0a6;
+    --surface-container-lowest: #0a0d12;
+    --surface-container-low: #141820;
+    --surface-container: #1a1f2e;
+    --surface-container-high: #1f2535;
+    --surface-container-highest: #252b3b;
+    --outline: #3c4455;
+    --outline-variant: #2a3040;
+    --background: #0a0d12;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--on-surface);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer utilities {
+  .font-headline {
+    font-family: 'Inter', system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--outline);
+    border-radius: 99px;
+  }
+
+  .bg-surface { background-color: var(--surface); }
+  .bg-surface-container-lowest { background-color: var(--surface-container-lowest); }
+  .bg-surface-container-low { background-color: var(--surface-container-low); }
+  .bg-surface-container { background-color: var(--surface-container); }
+  .bg-surface-container-high { background-color: var(--surface-container-high); }
+  .bg-surface-container-highest { background-color: var(--surface-container-highest); }
+  .bg-background { background-color: var(--background); }
+  .bg-primary { background-color: var(--primary); }
+  .bg-primary-dim { background-color: var(--primary-dim); }
+  .bg-secondary { background-color: var(--secondary); }
+  .bg-tertiary { background-color: var(--tertiary); }
+  .bg-error { background-color: var(--error); }
+
+  .text-on-surface { color: var(--on-surface); }
+  .text-on-surface-variant { color: var(--on-surface-variant); }
+  .text-on-primary { color: var(--on-primary); }
+  .text-primary { color: var(--primary); }
+  .text-primary-dim { color: var(--primary-dim); }
+  .text-secondary { color: var(--secondary); }
+  .text-tertiary { color: var(--tertiary); }
+  .text-error { color: var(--error); }
+  .text-outline { color: var(--outline); }
+
+  .border-outline { border-color: var(--outline); }
+  .border-outline-variant { border-color: var(--outline-variant); }
+
+  .bg-primary\/5  { background-color: color-mix(in srgb, var(--primary) 5%, transparent); }
+  .bg-primary\/10 { background-color: color-mix(in srgb, var(--primary) 10%, transparent); }
+  .bg-primary\/20 { background-color: color-mix(in srgb, var(--primary) 20%, transparent); }
+  .bg-primary\/30 { background-color: color-mix(in srgb, var(--primary) 30%, transparent); }
+  .bg-tertiary\/10 { background-color: color-mix(in srgb, var(--tertiary) 10%, transparent); }
+  .bg-secondary\/10 { background-color: color-mix(in srgb, var(--secondary) 10%, transparent); }
+  .bg-error\/10   { background-color: color-mix(in srgb, var(--error) 10%, transparent); }
+  .bg-on-surface-variant\/10 { background-color: color-mix(in srgb, var(--on-surface-variant) 10%, transparent); }
+  .bg-outline\/10 { background-color: color-mix(in srgb, var(--outline) 10%, transparent); }
+  .bg-outline\/20 { background-color: color-mix(in srgb, var(--outline) 20%, transparent); }
+
+  .border-primary\/10 { border-color: color-mix(in srgb, var(--primary) 10%, transparent); }
+  .border-primary\/20 { border-color: color-mix(in srgb, var(--primary) 20%, transparent); }
+  .border-primary\/30 { border-color: color-mix(in srgb, var(--primary) 30%, transparent); }
+  .border-primary\/40 { border-color: color-mix(in srgb, var(--primary) 40%, transparent); }
+  .border-primary\/50 { border-color: color-mix(in srgb, var(--primary) 50%, transparent); }
+  .border-tertiary\/10 { border-color: color-mix(in srgb, var(--tertiary) 10%, transparent); }
+  .border-tertiary\/40 { border-color: color-mix(in srgb, var(--tertiary) 40%, transparent); }
+  .border-secondary\/40 { border-color: color-mix(in srgb, var(--secondary) 40%, transparent); }
+  .border-error\/10   { border-color: color-mix(in srgb, var(--error) 10%, transparent); }
+  .border-outline\/5  { border-color: color-mix(in srgb, var(--outline) 5%, transparent); }
+  .border-outline\/10 { border-color: color-mix(in srgb, var(--outline) 10%, transparent); }
+  .border-outline\/20 { border-color: color-mix(in srgb, var(--outline) 20%, transparent); }
+  .border-outline\/30 { border-color: color-mix(in srgb, var(--outline) 30%, transparent); }
+  .border-outline-variant\/10 { border-color: color-mix(in srgb, var(--outline-variant) 10%, transparent); }
+
+  .text-primary\/50 { color: color-mix(in srgb, var(--primary) 50%, transparent); }
+  .text-on-surface-variant\/60 { color: color-mix(in srgb, var(--on-surface-variant) 60%, transparent); }
+  .text-on-surface-variant\/80 { color: color-mix(in srgb, var(--on-surface-variant) 80%, transparent); }
+
+  .shadow-primary\/5  { --tw-shadow-color: color-mix(in srgb, var(--primary) 5%, transparent); }
+  .shadow-primary\/10 { --tw-shadow-color: color-mix(in srgb, var(--primary) 10%, transparent); }
+  .shadow-primary\/20 { --tw-shadow-color: color-mix(in srgb, var(--primary) 20%, transparent); }
+  .shadow-primary\/25 { --tw-shadow-color: color-mix(in srgb, var(--primary) 25%, transparent); }
+}

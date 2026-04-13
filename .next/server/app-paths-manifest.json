@@ -1,0 +1,10 @@
+{
+  "/apple-icon.png/route": "app/apple-icon.png/route.js",
+  "/icon.png/route": "app/icon.png/route.js",
+  "/login/page": "app/login/page.js",
+  "/(protected)/dashboard/page": "app/(protected)/dashboard/page.js",
+  "/(protected)/projects/page": "app/(protected)/projects/page.js",
+  "/(protected)/tasks/page": "app/(protected)/tasks/page.js",
+  "/(protected)/kanban/page": "app/(protected)/kanban/page.js",
+  "/(protected)/contacts/page": "app/(protected)/contacts/page.js"
+}
