@@ -19,7 +19,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Folder, Calendar, Clock, CheckCircle2, AlertCircle, PlayCircle, MoreHorizontal, MessageSquare, LayoutGrid, Plus, Hash, Briefcase, Filter, X, GripVertical, TrendingUp, Search, ChevronDown, Rows3, Truck, PauseCircle } from 'lucide-react';
+import { Folder, Calendar, Clock, CheckCircle2, AlertCircle, PlayCircle, MoreHorizontal, MessageSquare, LayoutGrid, Plus, Hash, Briefcase, Filter, X, GripVertical, TrendingUp, Search, ChevronDown, ChevronUp, Rows3, Truck, PauseCircle, User, Radio, Flag, AlertTriangle, List, ArrowUpDown } from 'lucide-react';
 import { useToast } from '@/lib/contexts/ToastContext';
 import { cn } from '@/lib/utils';
 import type { Task, Status, Project, Priority, Contact, Profile } from '@/lib/types';
@@ -31,12 +31,13 @@ import { useTaskIntake } from '@/lib/contexts/TaskIntakeContext';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const COLUMNS: { id: Status; label: string; color: string; bg: string; iconColor: string }[] = [
-  { id: 'pending',     label: 'Backlog',           color: 'text-on-surface-variant', bg: 'bg-surface-container-highest/40', iconColor: 'bg-surface-container-highest text-on-surface-variant' },
-  { id: 'in-progress', label: 'In Progress',       color: 'text-secondary',          bg: 'bg-secondary/5',                  iconColor: 'bg-secondary/10 text-secondary' },
-  { id: 'blocked',     label: 'Pending',           color: 'text-tertiary',           bg: 'bg-tertiary/5',                   iconColor: 'bg-tertiary/10 text-tertiary' },
-  { id: 'dispatched',  label: 'Out for Delivery',  color: 'text-[#34d399]',          bg: 'bg-[#34d399]/5',                  iconColor: 'bg-[#34d399]/10 text-[#34d399]' },
-  { id: 'overdue',     label: 'Overdue',           color: 'text-error',              bg: 'bg-error/5',                      iconColor: 'bg-error/10 text-error' },
-  { id: 'completed',   label: 'Done',              color: 'text-primary',            bg: 'bg-primary/5',                    iconColor: 'bg-primary/10 text-primary' },
+  { id: 'pending',     label: 'Backlog',     color: 'text-on-surface-variant', bg: 'bg-surface-container-highest/40', iconColor: 'bg-surface-container-highest text-on-surface-variant' },
+  { id: 'in-progress', label: 'In Progress', color: 'text-secondary',          bg: 'bg-secondary/5',                  iconColor: 'bg-secondary/10 text-secondary' },
+  { id: 'awaiting',    label: 'Awaiting',    color: 'text-tertiary',           bg: 'bg-tertiary/5',                   iconColor: 'bg-tertiary/10 text-tertiary' },
+  { id: 'ready',       label: 'Ready',       color: 'text-[#34d399]',          bg: 'bg-[#34d399]/5',                  iconColor: 'bg-[#34d399]/10 text-[#34d399]' },
+  { id: 'failed',      label: 'Failed',      color: 'text-[#fb923c]',          bg: 'bg-[#fb923c]/5',                  iconColor: 'bg-[#fb923c]/10 text-[#fb923c]' },
+  { id: 'overdue',     label: 'Overdue',     color: 'text-error',              bg: 'bg-error/5',                      iconColor: 'bg-error/10 text-error' },
+  { id: 'completed',   label: 'Done',        color: 'text-primary',            bg: 'bg-primary/5',                    iconColor: 'bg-primary/10 text-primary' },
 ];
 
 const PRIORITY_COLORS: Record<Priority, string> = {
@@ -179,10 +180,27 @@ function KanbanCard({
             {task.title}
           </p>
         </div>
-        <GripVertical
-          size={14}
-          className="text-on-surface-variant/30 group-hover:text-on-surface-variant/80 transition-colors shrink-0 mt-0.5 cursor-grab active:cursor-grabbing"
-        />
+        <div className="flex gap-2 items-center">
+          {task.assignee && (
+            <div className="flex items-center gap-1.5 bg-surface-container-highest pl-0.5 pr-2 py-0.5 rounded-full" title={task.assignee.full_name || 'Assignee'}>
+              <div className="w-4 h-4 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden font-bold text-[8px] text-primary">
+                {task.assignee.avatar_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={task.assignee.avatar_url} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  task.assignee.full_name?.charAt(0) || <User size={8} />
+                )}
+              </div>
+              <span className="text-[9px] font-bold text-on-surface-variant truncate max-w-[70px]">
+                {task.assignee.full_name?.split(' ')[0] || 'Unassigned'}
+              </span>
+            </div>
+          )}
+          <GripVertical
+            size={14}
+            className="text-on-surface-variant/30 group-hover:text-on-surface-variant/80 transition-colors shrink-0 cursor-grab active:cursor-grabbing"
+          />
+        </div>
       </div>
 
       <div className="flex flex-col gap-1.5 mb-3">
@@ -205,8 +223,8 @@ function KanbanCard({
           </div>
         )}
         
-        {/* Registry & Job Type badging */}
-        {(task.registry_number || task.job_type) && (
+        {/* Registry, Job Type, Source, & Contact badging */}
+        {(task.registry_number || task.job_type || task.source || task.contact) && (
           <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
             {task.registry_number && (
               <span className="text-[9px] font-extrabold tracking-wider px-1.5 py-0.5 rounded bg-surface-container-highest text-on-surface-variant flex items-center gap-0.5">
@@ -221,6 +239,16 @@ function KanbanCard({
                 </span>
               );
             })()}
+            {task.source && (
+              <span className="text-[9px] font-extrabold tracking-wider px-1.5 py-0.5 rounded border border-outline/10 text-on-surface-variant bg-surface-container flex items-center gap-1">
+                <Radio size={9} className="opacity-70" />{task.source}
+              </span>
+            )}
+            {task.contact && (
+              <span className="text-[9px] font-extrabold tracking-wider px-1.5 py-0.5 rounded border border-outline/10 text-on-surface-variant bg-surface-container flex items-center gap-1 max-w-[120px] truncate">
+                <User size={9} className="opacity-70 shrink-0" /> <span className="truncate">{task.contact.name}</span>
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -281,8 +309,9 @@ function KanbanColumn({
           <div className={cn('w-7 h-7 rounded-lg flex items-center justify-center', col.iconColor)}>
             {col.id === 'pending'     && <Clock size={14} />}
             {col.id === 'in-progress' && <LayoutGrid size={14} />}
-            {col.id === 'blocked'     && <PauseCircle size={14} />}
-            {col.id === 'dispatched'  && <Truck size={14} />}
+            {col.id === 'awaiting'    && <PauseCircle size={14} />}
+            {col.id === 'ready'       && <Flag size={14} />}
+            {col.id === 'failed'      && <AlertTriangle size={14} />}
             {col.id === 'overdue'     && <AlertCircle size={14} />}
             {col.id === 'completed'   && <CheckCircle2 size={14} />}
           </div>
@@ -437,6 +466,211 @@ function ProjectSwimLane({
 }
 
 
+// ─── Task List View ───────────────────────────────────────────────────────────
+
+type SortCol = 'title' | 'status' | 'priority' | 'job_type' | 'due_date' | 'assigned_to' | 'created_at';
+
+const STATUS_ORDER: Record<string, number> = {
+  'pending': 0, 'in-progress': 1, 'awaiting': 2, 'ready': 3, 'failed': 4, 'overdue': 5, 'completed': 6,
+};
+const PRIORITY_ORDER: Record<string, number> = {
+  'critical': 0, 'high': 1, 'medium': 2, 'low': 3,
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  'pending': 'Backlog', 'in-progress': 'In Progress', 'awaiting': 'Awaiting',
+  'ready': 'Ready', 'failed': 'Failed', 'overdue': 'Overdue', 'completed': 'Done',
+};
+
+const STATUS_STYLE: Record<string, string> = {
+  'pending':     'bg-surface-container-highest text-on-surface-variant',
+  'in-progress': 'bg-secondary/10 text-secondary',
+  'awaiting':    'bg-tertiary/10 text-tertiary',
+  'ready':       'bg-[#34d399]/10 text-[#34d399]',
+  'failed':      'bg-[#fb923c]/10 text-[#fb923c]',
+  'overdue':     'bg-error/10 text-error',
+  'completed':   'bg-primary/10 text-primary',
+};
+
+function TaskListView({
+  tasks,
+  contacts,
+  profiles,
+  projectColorMap,
+  onRowClick,
+}: {
+  tasks: Task[];
+  contacts: Contact[];
+  profiles: Profile[];
+  projectColorMap: Map<string, string>;
+  onRowClick: (t: Task) => void;
+}) {
+  const [sortCol, setSortCol] = React.useState<SortCol>('due_date');
+  const [sortDir, setSortDir] = React.useState<'asc' | 'desc'>('asc');
+
+  const handleSort = (col: SortCol) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+
+  const sorted = React.useMemo(() => {
+    return [...tasks].sort((a, b) => {
+      let cmp = 0;
+      switch (sortCol) {
+        case 'title':       cmp = (a.title || '').localeCompare(b.title || ''); break;
+        case 'status':      cmp = (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9); break;
+        case 'priority':    cmp = (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9); break;
+        case 'job_type':    cmp = (a.job_type || '').localeCompare(b.job_type || ''); break;
+        case 'due_date':    cmp = (a.due_date || 'zzz').localeCompare(b.due_date || 'zzz'); break;
+        case 'created_at':  cmp = (a.created_at || '').localeCompare(b.created_at || ''); break;
+        case 'assigned_to': {
+          const pA = profiles.find(p => p.id === a.assigned_to)?.full_name || '';
+          const pB = profiles.find(p => p.id === b.assigned_to)?.full_name || '';
+          cmp = pA.localeCompare(pB);
+          break;
+        }
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [tasks, sortCol, sortDir, profiles]);
+
+  const SortHeader = ({ col, label }: { col: SortCol; label: string }) => (
+    <th
+      onClick={() => handleSort(col)}
+      className="px-4 py-3 text-left text-[10px] font-extrabold uppercase tracking-widest text-on-surface-variant cursor-pointer select-none hover:text-on-surface transition-colors group"
+    >
+      <div className="flex items-center gap-1.5">
+        {label}
+        {sortCol === col ? (
+          sortDir === 'asc' ? <ChevronUp size={11} className="text-primary" /> : <ChevronDown size={11} className="text-primary" />
+        ) : (
+          <ArrowUpDown size={10} className="opacity-0 group-hover:opacity-40 transition-opacity" />
+        )}
+      </div>
+    </th>
+  );
+
+  if (sorted.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 gap-3 text-on-surface-variant/40">
+        <List size={40} strokeWidth={1.5} />
+        <p className="text-sm font-bold">No tasks match your filters</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-outline/10 overflow-hidden">
+      <table className="w-full border-collapse text-sm">
+        <thead className="bg-surface-container-high/60">
+          <tr className="border-b border-outline/10">
+            <SortHeader col="title" label="Task" />
+            <SortHeader col="job_type" label="Type" />
+            <SortHeader col="status" label="Status" />
+            <SortHeader col="priority" label="Priority" />
+            <th className="px-4 py-3 text-left text-[10px] font-extrabold uppercase tracking-widest text-on-surface-variant">Contact</th>
+            <SortHeader col="assigned_to" label="Assigned To" />
+            <SortHeader col="due_date" label="Due" />
+            <SortHeader col="created_at" label="Created" />
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-outline/5 bg-surface-container">
+          {sorted.map(task => {
+            const jc = getJobTypeColor(task.job_type || '');
+            const contact = contacts.find(c => c.id === task.contact_id);
+            const assignee = profiles.find(p => p.id === task.assigned_to);
+            const due = task.due_date ? formatDate(task.due_date) : null;
+            const isOverdue = due?.includes('overdue');
+            return (
+              <tr
+                key={task.id}
+                onClick={() => onRowClick(task)}
+                className="hover:bg-surface-container-high transition-colors cursor-pointer group"
+              >
+                {/* Title */}
+                <td className="px-4 py-3 max-w-xs">
+                  <div className="flex items-center gap-2.5">
+                    {task.urgent && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-error shrink-0" title="Urgent" />
+                    )}
+                    <div className="min-w-0">
+                      <p className="font-semibold text-on-surface text-[13px] truncate group-hover:text-primary transition-colors">
+                        {task.title}
+                      </p>
+                      {task.registry_number && (
+                        <p className="text-[10px] text-on-surface-variant opacity-60 font-mono">{task.registry_number}</p>
+                      )}
+                    </div>
+                  </div>
+                </td>
+                {/* Job Type */}
+                <td className="px-4 py-3">
+                  {task.job_type ? (
+                    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold border', jc.badge)}>
+                      <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', jc.dot)} />
+                      {task.job_type}
+                    </span>
+                  ) : <span className="text-on-surface-variant/30 text-xs">—</span>}
+                </td>
+                {/* Status */}
+                <td className="px-4 py-3">
+                  <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-extrabold', STATUS_STYLE[task.status])}>
+                    {STATUS_LABEL[task.status] ?? task.status}
+                  </span>
+                </td>
+                {/* Priority */}
+                <td className="px-4 py-3">
+                  <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-extrabold border capitalize', PRIORITY_TEXT[task.priority as Priority])}>
+                    {task.priority}
+                  </span>
+                </td>
+                {/* Contact */}
+                <td className="px-4 py-3">
+                  {contact ? (
+                    <div>
+                      <p className="text-[12px] font-semibold text-on-surface truncate max-w-[120px]">{contact.name}</p>
+                      {contact.company && <p className="text-[10px] text-on-surface-variant opacity-60 truncate max-w-[120px]">{contact.company}</p>}
+                    </div>
+                  ) : <span className="text-on-surface-variant/30 text-xs">—</span>}
+                </td>
+                {/* Assigned To */}
+                <td className="px-4 py-3">
+                  {assignee ? (
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-[9px] shrink-0">
+                        {assignee.avatar_url
+                          ? <img src={assignee.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
+                          : assignee.full_name?.charAt(0)}
+                      </div>
+                      <span className="text-[12px] font-semibold text-on-surface truncate max-w-[100px]">{assignee.full_name}</span>
+                    </div>
+                  ) : <span className="text-on-surface-variant/30 text-xs">—</span>}
+                </td>
+                {/* Due Date */}
+                <td className="px-4 py-3">
+                  {due ? (
+                    <span className={cn('text-[12px] font-semibold', isOverdue ? 'text-error' : 'text-on-surface-variant')}>
+                      {due}
+                    </span>
+                  ) : <span className="text-on-surface-variant/30 text-xs">—</span>}
+                </td>
+                {/* Created At */}
+                <td className="px-4 py-3">
+                  <span className="text-[12px] text-on-surface-variant">
+                    {task.created_at
+                      ? new Date(task.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
+                      : '—'}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ─── Main Kanban Component ────────────────────────────────────────────────────
 
 export default function Kanban({
@@ -455,11 +689,20 @@ export default function Kanban({
   isAdmin?: boolean;
 }) {
   const [tasks, setTasks] = React.useState<Task[]>(initialTasks);
+  const [layoutMode, setLayoutMode] = React.useState<'board' | 'list'>(() => {
+    if (typeof window !== 'undefined') return (localStorage.getItem('views_layoutMode') as 'board' | 'list') ?? 'board';
+    return 'board';
+  });
   const [view, setView] = React.useState<'status' | 'project'>('status');
   const [projectFilter, setProjectFilter] = React.useState<string>('all');
   const [priorityFilter, setPriorityFilter] = React.useState<Priority | 'all'>('all');
   const [jobTypeFilter, setJobTypeFilter] = React.useState<string>('all');
   const [assignedOnly, setAssignedOnly] = React.useState(false);
+
+  const switchLayout = (mode: 'board' | 'list') => {
+    setLayoutMode(mode);
+    localStorage.setItem('views_layoutMode', mode);
+  };
 
   React.useEffect(() => {
     const stored = localStorage.getItem('kanban_assignedOnly');
@@ -553,15 +796,6 @@ export default function Kanban({
     // Persist only if status actually changed from what it was at drag start
     if (finalTask.status !== dragStartStatus.current) {
       const originalStatus = dragStartStatus.current!;
-
-      if (finalTask.status === 'in-progress' && !finalTask.next_action?.trim()) {
-        showToast('Next Action Required', 'Please set a Next Action in the task details before starting work.', 'error');
-        setTasks(prev => prev.map(t =>
-          t.id === activeId ? { ...t, status: originalStatus } : t
-        ));
-        dragStartStatus.current = null;
-        return;
-      }
 
       try {
         await updateTask(activeId, { status: finalTask.status });
@@ -696,10 +930,10 @@ export default function Kanban({
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div>
               <h1 className="text-4xl font-extrabold text-on-surface tracking-tight font-headline mb-2">
-                Kanban
+                Views
               </h1>
               <p className="text-on-surface-variant text-base font-medium flex items-center gap-2">
-                Drag tasks across columns to update their status.
+                {layoutMode === 'board' ? 'Drag tasks across columns to update their status.' : 'Browse all tasks in a sortable list.'}
                 <span className="w-1.5 h-1.5 rounded-full bg-outline/40 mx-2" />
                 <span className="text-primary font-bold">
                   {tasks.filter(t => t.job_type === 'Repair' && t.status !== 'completed').length} Repairs
@@ -713,6 +947,22 @@ export default function Kanban({
             </div>
 
             <div className="flex items-center gap-3 shrink-0">
+              {/* Board / List toggle */}
+              <div className="flex items-center bg-surface-container-high rounded-xl border border-outline/20 p-0.5">
+                <button
+                  onClick={() => switchLayout('board')}
+                  className={cn('flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all', layoutMode === 'board' ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:text-on-surface')}
+                >
+                  <LayoutGrid size={13} /> Board
+                </button>
+                <button
+                  onClick={() => switchLayout('list')}
+                  className={cn('flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all', layoutMode === 'list' ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:text-on-surface')}
+                >
+                  <List size={13} /> List
+                </button>
+              </div>
+
               {/* Assigned to Me toggle */}
                 <div className="flex items-center bg-surface-container-high rounded-xl border border-outline/20 p-0.5">
                   <button
@@ -739,7 +989,16 @@ export default function Kanban({
           {filterBar}
         </div>
 
-        {/* Board */}
+        {/* Board or List */}
+        {layoutMode === 'list' ? (
+          <TaskListView
+            tasks={filteredTasks}
+            contacts={contacts}
+            profiles={profiles}
+            projectColorMap={projectColorMap}
+            onRowClick={setSelectedTask}
+          />
+        ) : (
         <DndContext
           id="kanban-board-dnd"
           sensors={sensors}
@@ -822,6 +1081,7 @@ export default function Kanban({
             )}
           </DragOverlay>
         </DndContext>
+        )}
       </div>
     </>
   );

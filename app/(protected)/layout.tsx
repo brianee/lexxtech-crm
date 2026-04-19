@@ -37,6 +37,7 @@ export default async function ProtectedLayout({
   const currentRole    = currentProfile?.role ?? 'member';
   const currentUserId  = user.id;
   const userName       = currentProfile?.full_name || user.user_metadata?.full_name as string | undefined;
+  const currentFeatures = currentProfile?.features ?? ['kanban', 'contacts', 'projects', 'insights'];
 
   // SILENT BACKGROUND SYNC: Degrade contact health if neglected
   // Fire and forget, do not await this so it doesn't block rendering
@@ -65,6 +66,7 @@ export default async function ProtectedLayout({
         userName={userName}
         currentRole={currentRole}
         currentUserId={currentUserId}
+        currentFeatures={currentFeatures}
         hasServiceKey={!!process.env.SUPABASE_SERVICE_ROLE_KEY}
         tasks={tasks}
         projects={projects}

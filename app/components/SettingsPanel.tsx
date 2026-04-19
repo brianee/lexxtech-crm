@@ -4,13 +4,13 @@ import React from 'react';
 import {
   X, Sun, Moon, Monitor, Palette, Bell, BellOff, User, Globe,
   Download, Trash2, LogOut, ChevronRight, CheckCircle2, AlertTriangle,
-  Shield, Database, Zap, Users, Plus, Star, ShieldAlert
+  Shield, Database, Zap, Users, Plus, Star, ShieldAlert, Loader2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSettings, ACCENT_COLORS, type AppSettings, type ThemeMode, type AccentColor } from '@/lib/hooks/useSettings';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
-import { getProfiles, inviteUser, updateUserRole, removeUser, updateUserName, updateMyProfileName } from '@/lib/actions/admin';
+import { getProfiles, inviteUser, updateUserRole, removeUser, updateUserName, updateMyProfileName, updateUserFeatures } from '@/lib/actions/admin';
 import type { Profile, Role } from '@/lib/types';
 
 type Section = 'appearance' | 'profile' | 'notifications' | 'workspace' | 'team' | 'account';
@@ -431,6 +431,49 @@ function TeamAdminSection({ hasServiceKey = false }: { hasServiceKey?: boolean }
     }
   };
 
+  // ─── Staged Feature Permissions ───────────────────────────────────────────
+  // pendingFeatures holds local edits that have NOT yet been saved to the DB.
+  // Key = user id, Value = current checkbox state for that row.
+  const [pendingFeatures, setPendingFeatures] = React.useState<Record<string, string[]>>({});
+  const [savingPermissions, setSavingPermissions] = React.useState(false);
+
+  // How many rows have unsaved changes
+  const dirtyCount = Object.keys(pendingFeatures).length;
+
+  const getEffectiveFeatures = (profile: { id: string; features?: string[] | null }) =>
+    pendingFeatures[profile.id] ?? profile.features ?? ['kanban', 'contacts', 'projects', 'insights'];
+
+  const handleToggleFeature = (id: string, feature: string) => {
+    const current = getEffectiveFeatures(profiles.find(p => p.id === id)!);
+    const next = current.includes(feature)
+      ? current.filter(f => f !== feature)
+      : [...current, feature];
+    setPendingFeatures(prev => ({ ...prev, [id]: next }));
+  };
+
+  const handleSavePermissions = async () => {
+    if (dirtyCount === 0) return;
+    setSavingPermissions(true);
+    try {
+      await Promise.all(
+        Object.entries(pendingFeatures).map(([id, features]) => updateUserFeatures(id, features))
+      );
+      // Commit changes into the profiles state and clear pending
+      setProfiles(prev => prev.map(p =>
+        pendingFeatures[p.id] !== undefined
+          ? { ...p, features: pendingFeatures[p.id] }
+          : p
+      ));
+      setPendingFeatures({});
+    } catch {
+      alert('Failed to save permissions — check SUPABASE_SERVICE_ROLE_KEY');
+    } finally {
+      setSavingPermissions(false);
+    }
+  };
+
+  const handleDiscardPermissions = () => setPendingFeatures({});
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
       {!hasServiceKey && (
@@ -471,52 +514,121 @@ function TeamAdminSection({ hasServiceKey = false }: { hasServiceKey?: boolean }
       {loading ? (
         <p className="text-sm text-on-surface-variant animate-pulse">Loading profiles...</p>
       ) : (
-        <div className="space-y-3">
-          {profiles.map(p => (
-            <div key={p.id} className="flex justify-between items-center p-4 bg-surface-container rounded-2xl border border-outline/10 group">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold overflow-hidden shrink-0">
-                  {p.avatar_url ? <img src={p.avatar_url} alt="" className="w-full h-full object-cover" /> : p.full_name?.charAt(0) || <User size={16} />}
-                </div>
-                <div>
-                  {editingId === p.id ? (
-                    <div className="flex items-center gap-2">
-                      <input
-                        autoFocus
-                        value={editingName}
-                        onChange={e => setEditingName(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') handleRenameMember(p.id); if (e.key === 'Escape') setEditingId(null); }}
-                        className="bg-surface-container-highest border border-primary/40 rounded-lg px-2 py-1 text-sm text-on-surface outline-none w-36"
-                      />
-                      <button onClick={() => handleRenameMember(p.id)} className="p-1 text-primary hover:text-primary-dim"><CheckCircle2 size={14} /></button>
-                      <button onClick={() => setEditingId(null)} className="p-1 text-on-surface-variant hover:text-error"><X size={14} /></button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-sm font-bold text-on-surface">{p.full_name || 'Unnamed User'}</p>
-                      <button
-                        onClick={() => { setEditingId(p.id); setEditingName(p.full_name || ''); }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 text-on-surface-variant hover:text-primary"
-                        title="Rename"
-                      >
-                        <Star size={11} />
-                      </button>
-                    </div>
-                  )}
-                  <p className="text-xs text-on-surface-variant">{p.email}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <button onClick={() => handleChangeRole(p.id, p.role)} className={cn("px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider", p.role === 'admin' ? 'bg-error/10 text-error hover:bg-error/20' : 'bg-surface-container-highest text-on-surface-variant hover:bg-primary/20 hover:text-primary')}>
-                  {p.role}
+        <>
+          <div className="w-full overflow-x-auto custom-scrollbar border border-outline/10 rounded-2xl">
+            <table className="w-full text-left border-collapse min-w-[700px]">
+              <thead className="bg-surface-container-high/50 text-[10px] uppercase tracking-widest text-on-surface-variant">
+                <tr>
+                  <th className="px-4 py-3 font-extrabold w-64">User</th>
+                  <th className="px-4 py-3 font-extrabold">Role</th>
+                  <th className="px-4 py-3 font-extrabold text-center">Kanban</th>
+                  <th className="px-4 py-3 font-extrabold text-center">Contacts</th>
+                  <th className="px-4 py-3 font-extrabold text-center">Projects</th>
+                  <th className="px-4 py-3 font-extrabold text-center">Insights</th>
+                  <th className="px-4 py-3 font-extrabold text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-outline/10 bg-surface-container">
+                {profiles.map(p => {
+                  const feats = getEffectiveFeatures(p);
+                  const isDirty = pendingFeatures[p.id] !== undefined;
+                  return (
+                    <tr key={p.id} className={cn('group transition-colors', isDirty ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-surface-container-high')}>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold overflow-hidden shrink-0 text-xs">
+                            {p.avatar_url ? <img src={p.avatar_url} alt="" className="w-full h-full object-cover" /> : p.full_name?.charAt(0) || <User size={14} />}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            {editingId === p.id ? (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  autoFocus
+                                  value={editingName}
+                                  onChange={e => setEditingName(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter') handleRenameMember(p.id); if (e.key === 'Escape') setEditingId(null); }}
+                                  className="bg-surface-container-highest border border-primary/40 rounded-md px-1.5 py-0.5 text-xs text-on-surface outline-none w-28"
+                                />
+                                <button onClick={() => handleRenameMember(p.id)} className="p-0.5 text-primary hover:text-primary-dim"><CheckCircle2 size={12} /></button>
+                                <button onClick={() => setEditingId(null)} className="p-0.5 text-on-surface-variant hover:text-error"><X size={12} /></button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-xs font-bold text-on-surface truncate">{p.full_name || 'Unnamed User'}</p>
+                                <button
+                                  onClick={() => { setEditingId(p.id); setEditingName(p.full_name || ''); }}
+                                  className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 text-on-surface-variant hover:text-primary"
+                                  title="Rename"
+                                >
+                                  <Star size={10} />
+                                </button>
+                                {isDirty && (
+                                  <span className="text-[9px] font-extrabold text-primary bg-primary/15 px-1.5 py-0.5 rounded-full uppercase tracking-widest">Unsaved</span>
+                                )}
+                              </div>
+                            )}
+                            <p className="text-[10px] text-on-surface-variant opacity-70 truncate">{p.email}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <button onClick={() => handleChangeRole(p.id, p.role)} className={cn("px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest", p.role === 'admin' ? 'bg-error/10 text-error hover:bg-error/20' : 'bg-surface-container-highest text-on-surface-variant hover:bg-primary/20 hover:text-primary')}>
+                          {p.role}
+                        </button>
+                      </td>
+                      {['kanban', 'contacts', 'projects', 'insights'].map(f => (
+                        <td key={f} className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={feats.includes(f)}
+                            onChange={() => handleToggleFeature(p.id, f)}
+                            disabled={p.role === 'admin'}
+                            title={p.role === 'admin' ? 'Admins always have full access' : undefined}
+                            className="w-4 h-4 rounded border-outline/30 text-primary focus:ring-primary/40 bg-surface-container-lowest cursor-pointer transition-colors accent-primary disabled:opacity-30 disabled:cursor-not-allowed"
+                          />
+                        </td>
+                      ))}
+                      <td className="px-4 py-3 text-right">
+                        <button onClick={() => handleRemove(p.id)} className="text-on-surface-variant hover:text-error opacity-50 hover:opacity-100 transition-all p-1">
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ── Save Permissions Footer ── */}
+          {dirtyCount > 0 && (
+            <div className="flex items-center justify-between px-4 py-3 bg-primary/5 border border-primary/20 rounded-2xl animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <p className="text-xs font-bold text-primary">
+                {dirtyCount} user{dirtyCount !== 1 ? 's' : ''} with unsaved permission changes
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleDiscardPermissions}
+                  disabled={savingPermissions}
+                  className="px-3 py-1.5 text-xs font-bold text-on-surface-variant hover:text-on-surface transition-colors disabled:opacity-40"
+                >
+                  Discard
                 </button>
-                <button onClick={() => handleRemove(p.id)} className="text-on-surface-variant hover:text-error opacity-50 hover:opacity-100 transition-all p-1">
-                  <Trash2 size={16} />
+                <button
+                  onClick={handleSavePermissions}
+                  disabled={savingPermissions}
+                  className="flex items-center gap-1.5 px-4 py-1.5 bg-primary text-on-primary text-xs font-bold rounded-lg transition-all hover:bg-primary-dim disabled:opacity-50 shadow-lg shadow-primary/20"
+                >
+                  {savingPermissions ? (
+                    <><Loader2 size={12} className="animate-spin" /> Saving…</>
+                  ) : (
+                    <><CheckCircle2 size={12} /> Save Permissions</>
+                  )}
                 </button>
               </div>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </div>
   );

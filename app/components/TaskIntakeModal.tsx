@@ -142,9 +142,10 @@ interface TaskIntakeModalProps {
   onClose: () => void;
   onCreated: (task: Task) => void;
   initialData?: { projectId?: string; contactId?: string };
+  isAdmin?: boolean;
 }
 
-export default function TaskIntakeModal({ contacts, projects, profiles = [], onClose, onCreated, initialData }: TaskIntakeModalProps) {
+export default function TaskIntakeModal({ contacts, projects, profiles = [], isAdmin = false, onClose, onCreated, initialData }: TaskIntakeModalProps) {
   // Form state
   const [title, setTitle]           = React.useState('');
   const [message, setMessage]       = React.useState('');
@@ -385,18 +386,20 @@ export default function TaskIntakeModal({ contacts, projects, profiles = [], onC
           </div>
 
           {/* Assigned To + Due Date */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <FieldLabel icon={User}>Assigned To</FieldLabel>
-              <SearchSelect
-                items={profiles.map(p => ({ id: p.id, name: p.full_name || 'Unnamed Member' }))}
-                value={assignedTo}
-                onChange={setAssignedTo}
-                placeholder="Assign member…"
-                renderItem={p => <span className="font-semibold text-on-surface">{p.name}</span>}
-                renderSelected={p => <span className="font-semibold text-on-surface text-sm">{p.name}</span>}
-              />
-            </div>
+          <div className={cn("grid gap-4", isAdmin ? "grid-cols-2" : "grid-cols-1")}>
+            {isAdmin && (
+              <div>
+                <FieldLabel icon={User}>Assigned To</FieldLabel>
+                <SearchSelect
+                  items={profiles.map(p => ({ id: p.id, name: p.full_name || 'Unnamed Member' }))}
+                  value={assignedTo}
+                  onChange={setAssignedTo}
+                  placeholder="Assign member…"
+                  renderItem={p => <span className="font-semibold text-on-surface">{p.name}</span>}
+                  renderSelected={p => <span className="font-semibold text-on-surface text-sm">{p.name}</span>}
+                />
+              </div>
+            )}
             <div>
               <FieldLabel icon={Calendar}>Due Date</FieldLabel>
               <FieldBox>

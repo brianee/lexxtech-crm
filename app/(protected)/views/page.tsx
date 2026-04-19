@@ -6,9 +6,9 @@ import { getProfiles } from '@/lib/actions/admin';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 
-export const metadata = { title: 'Kanban — LexxTech CRM' };
+export const metadata = { title: 'Views — LexxTech CRM' };
 
-export default async function KanbanPage() {
+export default async function ViewsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 

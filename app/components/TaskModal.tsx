@@ -17,13 +17,59 @@ import {
   Briefcase,
   Paperclip,
   Loader2,
-  FileText
+  FileText,
+  Truck,
+  Navigation,
+  Package,
+  CreditCard,
+  PlayCircle,
+  AlertTriangle,
+  CheckCircle2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Task, Project, Contact, Priority, Status, TaskInteraction, Attachment } from '@/lib/types';
-import { updateTask, deleteTask, getTaskInteractions, addTaskInteraction } from '@/lib/actions/tasks';
+import { updateTask, deleteTask, getTaskInteractions, addTaskInteraction, advanceTaskStage } from '@/lib/actions/tasks';
 import { getAttachments, saveAttachmentRecord, deleteAttachment } from '@/lib/actions/attachments';
 import { createClient } from '@/lib/supabase/client';
+import Link from 'next/link';
+
+// ─── Image Optimization Helper ────────────────────────────────────────────────
+const resizeImage = (file: File): Promise<File> => {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith('image/')) return resolve(file);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const max = 1920;
+        if (width > max || height > max) {
+          if (width > height) {
+            height = Math.round((height *= max / width));
+            width = max;
+          } else {
+            width = Math.round((width *= max / height));
+            height = max;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => {
+          if (blob) resolve(new File([blob], file.name, { type: file.type }));
+          else resolve(file);
+        }, file.type, 0.85); // 85% quality JPEG
+      };
+      if (e.target?.result) {
+        img.src = e.target.result as string;
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -36,8 +82,11 @@ const JOB_TYPES = [
 const STATUS_OPTIONS: { value: Status; label: string; color: string; bg: string }[] = [
   { value: 'pending',     label: 'Backlog',     color: 'text-on-surface-variant', bg: 'bg-surface-container-highest' },
   { value: 'in-progress', label: 'In Progress', color: 'text-secondary',          bg: 'bg-secondary/10' },
+  { value: 'awaiting',    label: 'Awaiting',    color: 'text-tertiary',           bg: 'bg-tertiary/10' },
+  { value: 'ready',       label: 'Ready',       color: 'text-[#34d399]',          bg: 'bg-[#34d399]/10' },
+  { value: 'failed',      label: 'Failed',      color: 'text-[#fb923c]',          bg: 'bg-[#fb923c]/10' },
   { value: 'overdue',     label: 'Overdue',     color: 'text-error',              bg: 'bg-error/10' },
-  { value: 'completed',   label: 'Done',         color: 'text-primary',            bg: 'bg-primary/10' },
+  { value: 'completed',   label: 'Done',        color: 'text-primary',            bg: 'bg-primary/10' },
 ];
 
 const PRIORITY_OPTIONS: { value: Priority; label: string; color: string; bg: string }[] = [
@@ -88,6 +137,381 @@ function PillSelect<T extends string>({
   );
 }
 
+// ─── Stage Action Config ────────────────────────────────────────────────────────────────────
+type ProofConfig = {
+  title: string;        // e.g. "Proof of Repair Required"
+  hint: string;         // e.g. "Upload a photo of the completed repair work."
+  confirmLabel: string; // e.g. "Confirm Repair"
+  filePrefix: string;   // e.g. "POR" → POR_filename.jpg
+};
+
+type StageConfig = {
+  label: string;
+  icon: React.ElementType;
+  colorClass: string;
+  description: string;
+  requiresOutcome?: boolean;
+  outcomeQuestion?: string;
+  successLabel?: string;
+  failLabel?: string;
+  proofConfig?: ProofConfig;
+} | null;
+
+function getStageConfig(status: Status, jobType: string | null | undefined): StageConfig {
+  const jt = (jobType ?? '').toLowerCase();
+
+  if (jt === 'delivery') {
+    switch (status) {
+      case 'pending':     return { label: 'Assign Rider & Confirm Pickup', icon: Truck,       colorClass: 'bg-secondary text-on-primary shadow-secondary/20',  description: 'Confirm the rider physically has the package and is ready to go.' };
+      case 'in-progress': return { label: 'Mark Out for Delivery',         icon: Navigation,  colorClass: 'bg-tertiary text-on-primary shadow-tertiary/20',    description: 'Rider is on the way to the recipient.' };
+      case 'awaiting':    return {
+        label: 'Log Delivery Attempt', icon: Package, colorClass: 'bg-[#34d399] text-surface shadow-[#34d399]/20',
+        description: 'Record whether the delivery was successful or failed.',
+        requiresOutcome: true,
+        outcomeQuestion: 'Was this delivery successful?',
+        successLabel: 'Delivered ✓',
+        failLabel: 'Failed ✗',
+        proofConfig: {
+          title: 'Proof of Delivery Required',
+          hint: 'Upload a photo — signed receipt, package at door, or customer signature.',
+          confirmLabel: 'Confirm Delivered',
+          filePrefix: 'POD',
+        },
+      };
+      case 'ready':       return { label: 'Confirm Payment Received',      icon: CreditCard,  colorClass: 'bg-primary text-on-primary shadow-primary/20',      description: 'Mark payment as confirmed and close the job.' };
+      case 'failed':      return { label: 'Retry Delivery',                icon: RefreshCw,   colorClass: 'bg-[#fb923c] text-white shadow-[#fb923c]/20',       description: 'Move back to Awaiting and schedule another delivery attempt.' };
+      default:            return null;
+    }
+  }
+
+  if (jt === 'repair') {
+    switch (status) {
+      case 'pending':     return { label: 'Start Repair',               icon: PlayCircle, colorClass: 'bg-error text-white shadow-error/20',                description: 'Begin the repair job.' };
+      case 'in-progress': return {
+        label: 'Mark Repair Complete', icon: Package, colorClass: 'bg-[#34d399] text-surface shadow-[#34d399]/20',
+        description: 'Repair is done — confirm the outcome and attach proof.',
+        requiresOutcome: true,
+        outcomeQuestion: 'Was the repair completed successfully?',
+        successLabel: 'Completed ✓',
+        failLabel: 'Could Not Complete ✗',
+        proofConfig: {
+          title: 'Proof of Repair Required',
+          hint: 'Upload a photo of the completed repair work before closing.',
+          confirmLabel: 'Confirm Repair Done',
+          filePrefix: 'POR',
+        },
+      };
+      case 'awaiting':    return { label: 'Customer Approval Received',   icon: CreditCard, colorClass: 'bg-secondary text-on-primary shadow-secondary/20',  description: 'Customer approved the estimate. Resume repair work.' };
+      case 'ready':       return { label: 'Confirm Payment Received',    icon: CreditCard, colorClass: 'bg-primary text-on-primary shadow-primary/20',      description: 'Mark payment as confirmed and close the job.' };
+      case 'failed':      return { label: 'Resume Repair',               icon: RefreshCw,  colorClass: 'bg-[#fb923c] text-white shadow-[#fb923c]/20',       description: 'Restart the repair — move back to In Progress.' };
+      default:            return null;
+    }
+  }
+
+  if (jt === 'installation') {
+    switch (status) {
+      case 'pending':     return { label: 'Begin Installation',         icon: PlayCircle, colorClass: 'bg-primary text-on-primary shadow-primary/20',      description: 'Start the installation job on-site.' };
+      case 'in-progress': return {
+        label: 'Site Sign-Off Complete', icon: Package, colorClass: 'bg-[#34d399] text-surface shadow-[#34d399]/20',
+        description: 'Customer has signed off — attach proof of installation.',
+        requiresOutcome: true,
+        outcomeQuestion: 'Was the installation completed successfully?',
+        successLabel: 'Completed ✓',
+        failLabel: 'Could Not Complete ✗',
+        proofConfig: {
+          title: 'Proof of Installation Required',
+          hint: 'Upload a site photo or signed sign-off sheet.',
+          confirmLabel: 'Confirm Installation',
+          filePrefix: 'POI',
+        },
+      };
+      case 'ready':       return { label: 'Confirm Payment Received',   icon: CreditCard, colorClass: 'bg-primary text-on-primary shadow-primary/20',      description: 'Mark payment as confirmed and close the job.' };
+      case 'failed':      return { label: 'Retry Installation',         icon: RefreshCw,  colorClass: 'bg-[#fb923c] text-white shadow-[#fb923c]/20',       description: 'Restart the installation — move back to In Progress.' };
+      default:            return null;
+    }
+  }
+
+  if (jt === 'maintenance') {
+    switch (status) {
+      case 'pending':     return { label: 'Begin Service',              icon: PlayCircle, colorClass: 'bg-tertiary text-on-primary shadow-tertiary/20',    description: 'Start the maintenance service.' };
+      case 'in-progress': return {
+        label: 'Submit Service Report', icon: Package, colorClass: 'bg-[#34d399] text-surface shadow-[#34d399]/20',
+        description: 'Service complete — attach proof before closing.',
+        requiresOutcome: true,
+        outcomeQuestion: 'Was the service completed successfully?',
+        successLabel: 'Completed ✓',
+        failLabel: 'Could Not Complete ✗',
+        proofConfig: {
+          title: 'Proof of Service Required',
+          hint: 'Upload a photo of the serviced equipment or a signed service report.',
+          confirmLabel: 'Confirm Service Done',
+          filePrefix: 'POS',
+        },
+      };
+      case 'ready':       return { label: 'Confirm Payment Received',   icon: CreditCard, colorClass: 'bg-primary text-on-primary shadow-primary/20',      description: 'Mark payment as confirmed and close the job.' };
+      case 'failed':      return { label: 'Retry Service',              icon: RefreshCw,  colorClass: 'bg-[#fb923c] text-white shadow-[#fb923c]/20',       description: 'Restart the service — move back to In Progress.' };
+      default:            return null;
+    }
+  }
+
+  if (jt === 'consultation') {
+    switch (status) {
+      case 'pending':     return { label: 'Begin Consultation',         icon: PlayCircle, colorClass: 'bg-secondary text-on-primary shadow-secondary/20',  description: 'Start the consultation session.' };
+      case 'in-progress': return { label: 'Mark Meeting Complete',      icon: Package,    colorClass: 'bg-[#34d399] text-surface shadow-[#34d399]/20',     description: 'Meeting concluded successfully.' };
+      case 'ready':       return { label: 'Confirm Payment Received',   icon: CreditCard, colorClass: 'bg-primary text-on-primary shadow-primary/20',      description: 'Mark payment as confirmed and close the job.' };
+      default:            return null;
+    }
+  }
+
+  if (jt === 'development') {
+    switch (status) {
+      case 'pending':     return { label: 'Begin Development',          icon: PlayCircle, colorClass: 'bg-[#38bdf8] text-surface shadow-[#38bdf8]/20',    description: 'Start development work.' };
+      case 'in-progress': return { label: 'Submit for Client Review',   icon: Package,    colorClass: 'bg-tertiary text-on-primary shadow-tertiary/20',    description: 'Send deliverables to the client for review.' };
+      case 'awaiting':    return { label: 'Client Review Approved',     icon: CreditCard, colorClass: 'bg-primary text-on-primary shadow-primary/20',      description: 'Client signed off on the deliverables. Close the project.' };
+      default:            return null;
+    }
+  }
+
+  // Default / Other
+  switch (status) {
+    case 'pending':     return { label: 'Start Work',      icon: PlayCircle, colorClass: 'bg-secondary text-on-primary shadow-secondary/20',  description: 'Begin work on this task.' };
+    case 'in-progress': return { label: 'Mark Complete',   icon: Package,    colorClass: 'bg-[#34d399] text-surface shadow-[#34d399]/20',     description: 'Work is complete — pending final confirmation.' };
+    case 'ready':       return { label: 'Confirm & Close', icon: CreditCard, colorClass: 'bg-primary text-on-primary shadow-primary/20',      description: 'Confirm completion and archive this job.' };
+    default:            return null;
+  }
+}
+
+// ─── Stage Action Panel ────────────────────────────────────────────────────────────────────
+function StageActionPanel({
+  task,
+  onAdvanced,
+  isReadOnly,
+}: {
+  task: Task;
+  onAdvanced: (updated: Task) => void;
+  isReadOnly?: boolean;
+}) {
+  const [advancing, setAdvancing] = React.useState(false);
+  const [showOutcomeForm, setShowOutcomeForm] = React.useState(false);
+  const [stageError, setStageError] = React.useState('');
+  const [showSuccessUpload, setShowSuccessUpload] = React.useState(false);
+  const [proofFile, setProofFile] = React.useState<File | null>(null);
+  const [proofPreview, setProofPreview] = React.useState('');
+  const [uploadingProof, setUploadingProof] = React.useState(false);
+  const proofInputRef = React.useRef<HTMLInputElement>(null);
+  const status = task.status as Status;
+  const config = getStageConfig(status, task.job_type);
+
+  if (status === 'completed') {
+    return (
+      <div className="flex items-center gap-3 px-4 py-3.5 rounded-2xl bg-primary/10 border border-primary/20">
+        <CheckCircle2 size={16} className="text-primary shrink-0" />
+        <div>
+          <p className="text-[11px] font-extrabold text-primary uppercase tracking-widest">Job Closed</p>
+          <p className="text-[11px] text-on-surface-variant opacity-70 mt-0.5">This task has been completed and archived.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!config) return null;
+
+  const proof = config.proofConfig;
+
+  const handleAdvance = async (outcome?: 'success' | 'failed') => {
+    setAdvancing(true);
+    setStageError('');
+    try {
+      const updated = await advanceTaskStage(task.id, outcome ? { outcome } : undefined);
+      setShowOutcomeForm(false);
+      onAdvanced(updated);
+    } catch (err: unknown) {
+      setStageError(err instanceof Error ? err.message : 'Failed to advance stage. Please try again.');
+    } finally {
+      setAdvancing(false);
+    }
+  };
+
+  const handleSelectProof = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setProofFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setProofPreview((ev.target?.result as string) ?? '');
+    reader.readAsDataURL(file);
+  };
+
+  const handleSuccessWithProof = async () => {
+    if (!proofFile || !proof) return;
+    setUploadingProof(true);
+    setStageError('');
+    try {
+      const resized = await resizeImage(proofFile);
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+      const fileExt = resized.name.split('.').pop() ?? 'jpg';
+      const filePath = `${user.id}/${Date.now()}.${fileExt}`;
+      const { error: uploadError } = await supabase.storage.from('attachments').upload(filePath, resized);
+      if (uploadError) throw new Error(uploadError.message);
+      const { data: { publicUrl } } = supabase.storage.from('attachments').getPublicUrl(filePath);
+      await saveAttachmentRecord({
+        user_id: user.id,
+        task_id: task.id,
+        project_id: null,
+        file_name: `${proof.filePrefix}_${proofFile.name}`,
+        file_type: resized.type,
+        file_size_bytes: resized.size,
+        file_url: publicUrl,
+      });
+    } catch (err: unknown) {
+      setStageError(err instanceof Error ? err.message : 'Proof upload failed. Please try again.');
+      setUploadingProof(false);
+      return;
+    }
+    setUploadingProof(false);
+    await handleAdvance('success');
+  };
+
+  const Icon = config.icon;
+
+  return (
+    <div className="space-y-2.5">
+      <label className="flex items-center gap-2 text-[10px] font-extrabold text-primary uppercase tracking-widest">
+        <Zap size={12} />
+        Next Step
+      </label>
+
+      {showOutcomeForm ? (
+        <>
+          {showSuccessUpload && proof ? (
+            /* ── Proof Upload (generic) ───────────────────────── */
+            <div className="p-4 bg-surface-container border border-outline/15 rounded-2xl space-y-3">
+              <div className="flex items-center gap-2">
+                <Package size={14} className="text-[#34d399] shrink-0" />
+                <p className="text-xs font-extrabold text-on-surface">{proof.title}</p>
+              </div>
+              <p className="text-[11px] text-on-surface-variant opacity-60 leading-relaxed">
+                {proof.hint}
+              </p>
+              {proofPreview ? (
+                <div className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={proofPreview}
+                    alt="Proof photo"
+                    className="w-full h-36 object-cover rounded-xl border border-[#34d399]/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { setProofFile(null); setProofPreview(''); }}
+                    className="absolute top-2 right-2 w-6 h-6 rounded-full bg-surface-container/90 border border-outline/20 flex items-center justify-center text-on-surface-variant hover:text-error hover:bg-error/10 transition-colors"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => proofInputRef.current?.click()}
+                  className="w-full flex items-center justify-center gap-2 py-5 border-2 border-dashed border-outline/25 rounded-xl text-[12px] font-bold text-on-surface-variant hover:border-[#34d399]/50 hover:text-[#34d399] transition-all"
+                >
+                  <Paperclip size={14} />
+                  Tap to upload proof photo
+                </button>
+              )}
+              <input
+                ref={proofInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handleSelectProof}
+                className="hidden"
+              />
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => { setShowSuccessUpload(false); setProofFile(null); setProofPreview(''); }}
+                  disabled={uploadingProof || advancing}
+                  className="px-3 py-2.5 text-[11px] font-bold text-on-surface-variant hover:text-on-surface transition-colors disabled:opacity-40"
+                >
+                  ← Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSuccessWithProof}
+                  disabled={!proofFile || uploadingProof || advancing}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#34d399] text-surface font-bold text-xs shadow-lg shadow-[#34d399]/20 hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {(uploadingProof || advancing) ? <Loader2 size={13} className="animate-spin" /> : <Package size={13} />}
+                  {uploadingProof ? 'Uploading…' : advancing ? 'Saving…' : proof.confirmLabel}
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* ── Success / Fail Choice (generic) ───────────────── */
+            <div className="p-4 bg-surface-container border border-outline/15 rounded-2xl space-y-3">
+              <p className="text-xs font-extrabold text-on-surface">
+                {config.outcomeQuestion ?? 'How did this go?'}
+              </p>
+              <div className="flex gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => proof ? setShowSuccessUpload(true) : handleAdvance('success')}
+                  disabled={advancing}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-[#34d399] text-surface font-bold text-xs hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 shadow-lg shadow-[#34d399]/20"
+                >
+                  <Package size={14} />
+                  {config.successLabel ?? 'Success ✓'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAdvance('failed')}
+                  disabled={advancing}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-error/10 border border-error/30 text-error font-bold text-xs hover:bg-error/20 active:scale-95 transition-all disabled:opacity-50"
+                >
+                  <AlertTriangle size={14} />
+                  {config.failLabel ?? 'Failed ✗'}
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => !advancing && setShowOutcomeForm(false)}
+                className="text-[11px] font-bold text-on-surface-variant hover:text-on-surface transition-colors"
+              >
+                ← Cancel
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <button
+            onClick={() => config.requiresOutcome ? setShowOutcomeForm(true) : handleAdvance()}
+            disabled={advancing || isReadOnly}
+            className={cn(
+              'w-full flex items-center justify-center gap-2.5 py-3.5 px-5 rounded-2xl font-bold text-sm shadow-lg transition-all hover:-translate-y-0.5 active:translate-y-0 active:shadow-sm',
+              config.colorClass,
+              'disabled:opacity-50 disabled:cursor-not-allowed disabled:translate-y-0 disabled:shadow-none'
+            )}
+          >
+            {advancing ? <Loader2 size={16} className="animate-spin" /> : <Icon size={16} />}
+            {advancing ? 'Processing…' : config.label}
+          </button>
+          <p className="text-[10px] font-medium text-on-surface-variant opacity-55 px-1 leading-relaxed">
+            {config.description}
+          </p>
+        </>
+      )}
+
+      {stageError && (
+        <p className="text-[11px] font-bold text-error flex items-center gap-1.5">
+          <AlertTriangle size={11} /> {stageError}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Modal ───────────────────────────────────────────────────────────────
 
 interface TaskModalProps {
@@ -112,7 +536,6 @@ export default function TaskModal({
   const [form, setForm] = React.useState<Partial<Task>>({
     title:       task.title,
     description: task.description ?? '',
-    next_action: task.next_action ?? '',
     status:      task.status,
     priority:    task.priority,
     due_date:    task.due_date,
@@ -131,7 +554,6 @@ export default function TaskModal({
     const changed =
       form.title       !== task.title ||
       form.description !== (task.description ?? '') ||
-      form.next_action !== (task.next_action ?? '') ||
       form.status      !== task.status ||
       form.priority    !== task.priority ||
       form.due_date    !== task.due_date ||
@@ -156,6 +578,7 @@ export default function TaskModal({
   const [attachments, setAttachments] = React.useState<Attachment[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [isDraggingOver, setIsDraggingOver] = React.useState(false);
 
   React.useEffect(() => {
     let active = true;
@@ -185,22 +608,19 @@ export default function TaskModal({
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > 5242880) {
+  const processUpload = async (originalFile: File) => {
+    if (originalFile.size > 5242880 && !originalFile.type.startsWith('image/')) {
       alert("File exceeds 5MB limit.");
       return;
     }
-
     setUploadingAttachment(true);
     try {
+      const file = await resizeImage(originalFile);
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const fileExt = file.name.split('.').pop();
+      const fileExt = file.name.split('.').pop() || 'tmp';
       const filePath = `${user.id}/${Date.now()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
@@ -229,6 +649,27 @@ export default function TaskModal({
     } finally {
       setUploadingAttachment(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processUpload(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingOver(true);
+  };
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingOver(false);
+  };
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processUpload(e.dataTransfer.files[0]);
     }
   };
 
@@ -372,19 +813,12 @@ export default function TaskModal({
             {/* Left — main fields */}
             <div className="col-span-3 px-8 py-6 space-y-6 border-r border-outline/10">
 
-              {/* Next Action — most prominent field */}
-              <div>
-                <label className="flex items-center gap-2 text-[10px] font-extrabold text-primary uppercase tracking-widest mb-2">
-                  <Zap size={12} />
-                  Next Action
-                </label>
-                <input
-                  value={form.next_action ?? ''}
-                  onChange={e => setForm(f => ({ ...f, next_action: e.target.value }))}
-                  placeholder="What's the very next step? (e.g. 'Call Sarah to confirm deadline')"
-                  className={cn(fieldClass, 'border-primary/20 focus:ring-primary/40 bg-primary/5 text-on-surface placeholder-on-surface-variant/40')}
-                />
-              </div>
+              {/* Stage-Aware Action Panel */}
+              <StageActionPanel
+                task={task}
+                onAdvanced={onUpdated}
+                isReadOnly={isReadOnly}
+              />
 
               {/* Description */}
               <div>
@@ -410,7 +844,7 @@ export default function TaskModal({
                     <select
                       value={form.project_id ?? ''}
                       onChange={e => setForm(f => ({ ...f, project_id: e.target.value || null }))}
-                      className={cn(fieldClass, 'pr-8 cursor-pointer')}
+                      className={cn(fieldClass, 'pr-8 cursor-pointer appearance-none')}
                     >
                       <option value="">No project</option>
                       {projects.map(p => (
@@ -428,7 +862,7 @@ export default function TaskModal({
                     <select
                       value={form.contact_id ?? ''}
                       onChange={e => setForm(f => ({ ...f, contact_id: e.target.value || null }))}
-                      className={cn(fieldClass, 'pr-8 cursor-pointer')}
+                      className={cn(fieldClass, 'pr-8 cursor-pointer appearance-none')}
                     >
                       <option value="">No contact</option>
                       {contacts.map(c => (
@@ -450,7 +884,7 @@ export default function TaskModal({
                     <select
                       value={form.source ?? ''}
                       onChange={e => setForm(f => ({ ...f, source: e.target.value || null }))}
-                      className={cn(fieldClass, 'pr-8 cursor-pointer')}
+                      className={cn(fieldClass, 'pr-8 cursor-pointer appearance-none')}
                     >
                       <option value="" disabled>Select...</option>
                       {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
@@ -466,7 +900,7 @@ export default function TaskModal({
                     <select
                       value={form.job_type ?? ''}
                       onChange={e => setForm(f => ({ ...f, job_type: e.target.value || null }))}
-                      className={cn(fieldClass, 'pr-8 cursor-pointer')}
+                      className={cn(fieldClass, 'pr-8 cursor-pointer appearance-none')}
                     >
                       <option value="" disabled>Select...</option>
                       {JOB_TYPES.map(j => <option key={j} value={j}>{j}</option>)}
@@ -477,8 +911,19 @@ export default function TaskModal({
               </div>
 
               {/* ── Files & Attachments ── */}
-              <div className="pt-6 mt-6 border-t border-outline/10">
-                <div className="flex items-center justify-between mb-4">
+              <div
+                className="pt-6 mt-6 border-t border-outline/10 relative"
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                {/* Drag Overlay */}
+                {isDraggingOver && (
+                  <div className="absolute inset-0 z-10 bg-primary/10 border-2 border-primary border-dashed rounded-2xl flex items-center justify-center">
+                    <p className="text-primary font-bold text-sm animate-pulse">Drop file here...</p>
+                  </div>
+                )}
+                <div className="flex items-center justify-between mb-4 relative z-0">
                   <h4 className="text-sm font-extrabold text-on-surface font-headline flex items-center gap-2">
                     <Paperclip size={16} className="text-on-surface-variant/50" />
                     Attachments
@@ -500,13 +945,14 @@ export default function TaskModal({
                   />
                 </div>
                 
-                {attachments.length === 0 ? (
-                  <div className="p-4 border-2 border-dashed border-outline/15 rounded-2xl flex flex-col items-center justify-center gap-2">
-                    <Paperclip size={20} className="text-on-surface-variant opacity-30" />
-                    <p className="text-xs font-medium text-on-surface-variant opacity-50">No attachments. Max size 5MB.</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-3">
+                <div className="relative z-0">
+                  {attachments.length === 0 ? (
+                    <div className="p-4 border-2 border-dashed border-outline/15 rounded-2xl flex flex-col items-center justify-center gap-2">
+                      <Paperclip size={20} className="text-on-surface-variant opacity-30" />
+                      <p className="text-xs font-medium text-on-surface-variant opacity-50">Drag & drop or click Add File</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3">
                     {attachments.map(att => (
                       <div key={att.id} className="relative group p-2 bg-surface-container rounded-xl border border-outline/10 flex items-center gap-2">
                         {att.file_type.startsWith('image/') ? (
@@ -537,6 +983,7 @@ export default function TaskModal({
                     ))}
                   </div>
                 )}
+                </div>
               </div>
 
               {/* ── Activity / Comments ── */}
@@ -631,20 +1078,23 @@ export default function TaskModal({
               {linkedContact ? (
                 <div>
                   <p className="text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest mb-2 opacity-60">Contact</p>
-                  <div className="p-3.5 bg-surface-container rounded-2xl border border-outline/10 flex items-center gap-3">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={linkedContact.avatar || `https://picsum.photos/seed/${encodeURIComponent(linkedContact.name)}/100/100`}
-                      alt={linkedContact.name}
-                      className="w-9 h-9 rounded-xl object-cover shrink-0"
-                    />
-                    <div className="min-w-0">
-                      <p className="text-[13px] font-bold text-on-surface truncate">{linkedContact.name}</p>
-                      <p className="text-[10px] text-on-surface-variant font-medium opacity-60 truncate">
-                        {[linkedContact.role, linkedContact.company].filter(Boolean).join(' @ ')}
-                      </p>
+                  <Link href={`/contacts?id=${linkedContact.id}`} className="block">
+                    <div className="p-3.5 bg-surface-container rounded-2xl border border-outline/10 flex items-center gap-3 hover:border-primary/40 hover:bg-surface-container-high transition-colors cursor-pointer group">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={linkedContact.avatar || `https://picsum.photos/seed/${encodeURIComponent(linkedContact.name)}/100/100`}
+                        alt={linkedContact.name}
+                        className="w-9 h-9 rounded-xl object-cover shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-bold text-on-surface truncate group-hover:text-primary transition-colors">{linkedContact.name}</p>
+                        <p className="text-[10px] text-on-surface-variant font-medium opacity-60 truncate">
+                          {[linkedContact.role, linkedContact.company].filter(Boolean).join(' @ ')}
+                        </p>
+                      </div>
+                      <ArrowRight size={14} className="text-on-surface-variant opacity-30 group-hover:opacity-100 group-hover:text-primary transition-all shrink-0" />
                     </div>
-                  </div>
+                  </Link>
                 </div>
               ) : (
                 <div>
@@ -667,14 +1117,14 @@ export default function TaskModal({
                 </div>
               </div>
 
-              {/* Next Action recap (read-only reminder) */}
-              {form.next_action && (
+              {/* Legacy: Next Action note from old tasks (read-only) */}
+              {task.next_action && (
                 <div className="pt-2 border-t border-outline/10">
-                  <p className="text-[10px] font-extrabold text-primary uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                    <Zap size={10} /> Next Action
+                  <p className="text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest mb-1.5 flex items-center gap-1 opacity-50">
+                    <Zap size={10} /> Previous Note
                   </p>
-                  <p className="text-[12px] font-semibold text-on-surface-variant leading-relaxed">
-                    {form.next_action}
+                  <p className="text-[12px] font-semibold text-on-surface-variant leading-relaxed opacity-60">
+                    {task.next_action}
                   </p>
                 </div>
               )}

@@ -538,11 +538,13 @@ export default function Contacts({
   initialTasks,
   initialProjects,
   isAdmin = false,
+  initialContactId,
 }: {
   initialContacts: Contact[];
   initialTasks: Task[];
   initialProjects: Project[];
   isAdmin?: boolean;
+  initialContactId?: string;
 }) {
   const [contacts, setContacts] = React.useState<Contact[]>(initialContacts || []);
   const [tasks, setTasks] = React.useState<Task[]>(initialTasks || []);
@@ -556,7 +558,11 @@ export default function Contacts({
 
   React.useEffect(() => {
     setContacts(initialContacts || []);
-  }, [initialContacts]);
+    if (initialContactId && initialContacts) {
+      const match = initialContacts.find(c => c.id === initialContactId);
+      if (match) setSelectedContact(match);
+    }
+  }, [initialContacts, initialContactId]);
 
   const handleSave = (contact: Contact) => {
     setContacts((prev) => [contact, ...prev]);

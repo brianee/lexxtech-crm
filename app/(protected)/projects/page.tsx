@@ -3,6 +3,7 @@ import { getProjects } from '@/lib/actions/projects';
 import { getContacts } from '@/lib/actions/contacts';
 import { getProfiles } from '@/lib/actions/admin';
 import { createClient } from '@/lib/supabase/server';
+import { redirect } from 'next/navigation';
 
 export const metadata = { title: 'Projects — LexxTech' };
 
@@ -19,6 +20,11 @@ export default async function ProjectsPage() {
   const currentProfile = profiles.find(p => p.id === user?.id);
   const currentRole    = currentProfile?.role ?? 'member';
   const isAdmin        = currentRole === 'admin';
+  const features       = currentProfile?.features || ['kanban', 'contacts', 'projects', 'insights'];
+
+  if (!isAdmin && !features.includes('projects')) {
+    redirect('/dashboard');
+  }
 
   return (
     <Projects

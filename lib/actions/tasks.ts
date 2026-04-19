@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import type { Task, TaskInteraction } from '@/lib/types';
+import type { Task, TaskInteraction, Status } from '@/lib/types';
 import { createNotification } from './notifications';
 
 
@@ -66,7 +66,7 @@ export async function createTask(taskData: Partial<Task>) {
 
   const { data, error } = await supabase
     .from('tasks')
-    .insert([{ ...safeData, user_id: user.id }])
+    .insert([{ ...safeData, assigned_to: safeData.assigned_to || user.id, user_id: user.id }])
     .select()
     .single();
 
@@ -185,7 +185,7 @@ export async function getTaskInteractions(taskId: string): Promise<TaskInteracti
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('task_interactions')
-    .select('*, user:profiles(*)')
+    .select('*')
     .eq('task_id', taskId)
     .order('created_at', { ascending: true });
 
@@ -193,7 +193,18 @@ export async function getTaskInteractions(taskId: string): Promise<TaskInteracti
     console.error('Error fetching task interactions:', error);
     return [];
   }
-  return data as TaskInteraction[];
+  
+  const interactions = data as TaskInteraction[];
+  if (interactions.length === 0) return [];
+
+  const userIds = [...new Set(interactions.map(i => i.user_id))];
+  const { data: profiles } = await supabase.from('profiles').select('*').in('id', userIds);
+  const profileMap = new Map((profiles || []).map(p => [p.id, p]));
+
+  return interactions.map(i => ({
+    ...i,
+    user: profileMap.get(i.user_id)
+  }));
 }
 
 export async function addTaskInteraction(taskId: string, content: string): Promise<TaskInteraction> {
@@ -204,10 +215,14 @@ export async function addTaskInteraction(taskId: string, content: string): Promi
   const { data, error } = await supabase
     .from('task_interactions')
     .insert([{ task_id: taskId, user_id: user.id, content }])
-    .select('*, user:profiles(*)')
+    .select()
     .single();
 
   if (error) throw new Error(error.message);
+  
+  const interaction = data as TaskInteraction;
+  const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+  if (profile) interaction.user = profile;
 
   // Notification logic
   const { data: taskData } = await supabase.from('tasks').select('user_id, assigned_to').eq('id', taskId).single();
@@ -239,4 +254,151 @@ export async function addTaskInteraction(taskId: string, content: string): Promi
   }
 
   return data as TaskInteraction;
+}
+
+// ─── Stage-Aware Advance Action ──────────────────────────────────────────────
+
+export async function advanceTaskStage(
+  taskId: string,
+  payload?: { outcome?: 'success' | 'failed' }
+): Promise<Task> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Unauthenticated');
+
+  const { data: task } = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('id', taskId)
+    .single();
+  if (!task) throw new Error('Task not found');
+
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+  if (profile?.role !== 'admin' && task.assigned_to !== user.id) {
+    throw new Error('Unauthorized. You can only advance tasks assigned to you.');
+  }
+
+  const jt = (task.job_type ?? '').toLowerCase();
+  const current = task.status as Status;
+  let next: Status;
+  let log: string;
+
+  if (jt === 'delivery') {
+    switch (current) {
+      case 'pending':     next = 'in-progress'; log = '📦 Rider assigned — pickup confirmed.'; break;
+      case 'in-progress': next = 'awaiting';    log = '🚚 Marked out for delivery.'; break;
+      case 'awaiting': {
+        if (!payload?.outcome) throw new Error('Delivery outcome is required.');
+        if (payload.outcome === 'success') {
+          next = 'ready'; log = '✅ Delivery successful. Awaiting payment confirmation.';
+        } else {
+          next = 'failed'; log = '❌ Delivery attempt failed. Ready for retry.';
+        }
+        break;
+      }
+      case 'ready':  next = 'completed'; log = '💰 Payment confirmed. Job closed.'; break;
+      case 'failed': next = 'awaiting';  log = '🔄 Retry delivery scheduled.'; break;
+      default: throw new Error(`Cannot advance Delivery task from status: ${current}`);
+    }
+  } else if (jt === 'repair') {
+    switch (current) {
+      case 'pending':     next = 'in-progress'; log = '🔧 Repair started.'; break;
+      case 'in-progress': {
+        if (!payload?.outcome) throw new Error('Repair outcome is required.');
+        if (payload.outcome === 'success') {
+          next = 'ready'; log = '✅ Repair complete. Proof attached. Ready for pickup/delivery.';
+        } else {
+          next = 'failed'; log = '❌ Repair could not be completed. Moved to Failed.';
+        }
+        break;
+      }
+      case 'awaiting':    next = 'in-progress'; log = '✅ Customer approval received. Resuming repair.'; break;
+      case 'ready':       next = 'completed';   log = '💰 Payment confirmed. Job closed.'; break;
+      case 'failed':      next = 'in-progress'; log = '🔄 Repair resumed — back in progress.'; break;
+      default: throw new Error(`Cannot advance Repair task from status: ${current}`);
+    }
+  } else if (jt === 'installation') {
+    switch (current) {
+      case 'pending':     next = 'in-progress'; log = '🏗️ Installation started.'; break;
+      case 'in-progress': {
+        if (!payload?.outcome) throw new Error('Installation outcome is required.');
+        if (payload.outcome === 'success') {
+          next = 'ready'; log = '✅ Installation complete. Proof attached. Awaiting payment.';
+        } else {
+          next = 'failed'; log = '❌ Installation could not be completed. Moved to Failed.';
+        }
+        break;
+      }
+      case 'ready':       next = 'completed';   log = '💰 Payment confirmed. Job closed.'; break;
+      case 'failed':      next = 'in-progress'; log = '🔄 Installation restarted — back in progress.'; break;
+      default: throw new Error(`Cannot advance Installation task from status: ${current}`);
+    }
+  } else if (jt === 'maintenance') {
+    switch (current) {
+      case 'pending':     next = 'in-progress'; log = '🔨 Service started.'; break;
+      case 'in-progress': {
+        if (!payload?.outcome) throw new Error('Service outcome is required.');
+        if (payload.outcome === 'success') {
+          next = 'ready'; log = '📋 Service complete. Proof attached. Awaiting payment.';
+        } else {
+          next = 'failed'; log = '❌ Service could not be completed. Moved to Failed.';
+        }
+        break;
+      }
+      case 'ready':       next = 'completed';   log = '💰 Payment confirmed. Job closed.'; break;
+      case 'failed':      next = 'in-progress'; log = '🔄 Service retry — back in progress.'; break;
+      default: throw new Error(`Cannot advance Maintenance task from status: ${current}`);
+    }
+  } else if (jt === 'consultation') {
+    switch (current) {
+      case 'pending':     next = 'in-progress'; log = '💼 Consultation started.'; break;
+      case 'in-progress': next = 'ready';       log = '✅ Meeting marked complete.'; break;
+      case 'ready':       next = 'completed';   log = '💰 Payment confirmed. Job closed.'; break;
+      default: throw new Error(`Cannot advance Consultation task from status: ${current}`);
+    }
+  } else if (jt === 'development') {
+    switch (current) {
+      case 'pending':     next = 'in-progress'; log = '💻 Development started.'; break;
+      case 'in-progress': next = 'awaiting';    log = '📤 Submitted for client review.'; break;
+      case 'awaiting':    next = 'completed';   log = '✅ Client review approved. Job closed.'; break;
+      default: throw new Error(`Cannot advance Development task from status: ${current}`);
+    }
+  } else {
+    // Default / Other job types
+    switch (current) {
+      case 'pending':     next = 'in-progress'; log = '▶️ Work started.'; break;
+      case 'in-progress': next = 'ready';       log = '✅ Work complete.'; break;
+      case 'ready':       next = 'completed';   log = '✅ Confirmed and closed.'; break;
+      default: throw new Error(`Cannot advance task from status: ${current}`);
+    }
+  }
+
+  const { data: updatedTask, error } = await supabase
+    .from('tasks')
+    .update({ status: next })
+    .eq('id', taskId)
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+
+  // Auto-log a system interaction for full audit trail
+  supabase.from('task_interactions').insert([{
+    task_id: taskId,
+    user_id: user.id,
+    content: `⚡ ${log}`,
+  }]).then(() => {}, console.error);
+
+  // Completion cascades
+  if (next === 'completed') {
+    const projectId = updatedTask.project_id || task.project_id;
+    if (projectId) recalculateProjectProgress(projectId).catch(console.error);
+    const contactId = updatedTask.contact_id || task.contact_id;
+    if (contactId) recordContactInteraction(contactId).catch(console.error);
+  }
+
+  revalidatePath('/tasks');
+  revalidatePath('/dashboard');
+  revalidatePath('/kanban');
+  return updatedTask as Task;
 }

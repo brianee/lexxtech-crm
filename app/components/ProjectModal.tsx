@@ -44,6 +44,7 @@ export default function ProjectModal({ project: initialProject, profiles = [], c
   const [bLines, setBLines] = React.useState([{ desc: '', amount: '' }]);
   const [bStatus, setBStatus] = React.useState<'pending' | 'paid' | 'overdue'>('pending');
   const [bDate, setBDate] = React.useState(new Date().toISOString().split('T')[0]);
+  const [bTaskId, setBTaskId] = React.useState('');
 
   // Description & Interaction State
   const [descEditMode, setDescEditMode] = React.useState(false);
@@ -129,6 +130,7 @@ export default function ProjectModal({ project: initialProject, profiles = [], c
     try {
       const newTx = await createBillingTransaction({
         project_id: project.id,
+        task_id: bTaskId || null,
         description,
         amount: totalAmount,
         status: bStatus,
@@ -141,6 +143,7 @@ export default function ProjectModal({ project: initialProject, profiles = [], c
       }));
       setShowBillingForm(false);
       setBLines([{ desc: '', amount: '' }]);
+      setBTaskId('');
     } catch (err) {
       console.error(err);
       alert('Failed to add transaction');
@@ -289,8 +292,8 @@ export default function ProjectModal({ project: initialProject, profiles = [], c
     <div class="section-label">Issued By</div>
     <div class="info-grid">
       <div class="info-item">
-        <p>Project</p>
-        <strong style="font-size:16px">${project.name}</strong>
+        <p>Service Provider</p>
+        <strong>LexxTech</strong>
       </div>
       <div class="info-item">
         <p>Account Email</p>
@@ -640,6 +643,25 @@ export default function ProjectModal({ project: initialProject, profiles = [], c
                         + Add Line
                       </button>
                     </div>
+
+                    {/* Link to Task */}
+                    {(project.tasks ?? []).length > 0 && (
+                      <div>
+                        <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-1.5">Link to Task <span className="normal-case font-normal opacity-60">(optional)</span></label>
+                        <select
+                          value={bTaskId}
+                          onChange={e => setBTaskId(e.target.value)}
+                          className="w-full bg-surface-container-highest border border-outline/10 rounded-lg p-2.5 text-sm text-on-surface outline-none cursor-pointer [color-scheme:dark]"
+                        >
+                          <option value="">— No linked task —</option>
+                          {(project.tasks ?? []).map(t => (
+                            <option key={t.id} value={t.id}>
+                              {t.registry_number ? `[${t.registry_number}] ` : ''}{t.title}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
 
                     <div className="flex items-center gap-4">
                       <div className="flex-1">

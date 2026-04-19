@@ -15,7 +15,7 @@ import {
   Menu,
   X,
   LogOut,
-  LayoutGrid,
+  Layers,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -35,6 +35,7 @@ interface AppLayoutProps {
   userName?: string;
   currentRole?: Role;
   currentUserId?: string;
+  currentFeatures?: string[];
   hasServiceKey?: boolean;
   tasks?: Task[];
   projects?: Project[];
@@ -50,6 +51,7 @@ export default function AppLayout({
   userName,
   currentRole = 'member',
   currentUserId,
+  currentFeatures = ['kanban', 'contacts', 'projects', 'insights'],
   hasServiceKey = false,
   tasks = [],
   projects = [],
@@ -74,10 +76,15 @@ export default function AppLayout({
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, href: '/dashboard' },
     { id: 'projects',  label: 'Projects',  icon: FolderOpen,       href: '/projects' },
     { id: 'tasks',     label: 'Tasks',     icon: CheckCircle2,     href: '/tasks' },
-    { id: 'kanban',    label: 'Kanban',    icon: LayoutGrid,       href: '/kanban' },
+    { id: 'kanban',    label: 'Views',     icon: Layers,          href: '/views' },
     { id: 'contacts',  label: 'Contacts',  icon: Users,            href: '/contacts' },
-    ...(isAdmin ? [{ id: 'insights', label: 'Insights', icon: BarChart3, href: '/insights' }] : []),
-  ];
+    { id: 'insights',  label: 'Insights',  icon: BarChart3,        href: '/insights' },
+  ].filter(item => {
+    // Always show Dashboard and Tasks (which is essentially a basic list view)
+    if (['dashboard', 'tasks'].includes(item.id)) return true;
+    if (isAdmin) return true;
+    return currentFeatures.includes(item.id);
+  });
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -126,12 +133,12 @@ export default function AppLayout({
         <SettingsPanel onClose={() => setShowSettings(false)} userEmail={userEmail} userName={userName} isAdmin={isAdmin} hasServiceKey={hasServiceKey} />
       )}
 
-      {/* Task Intake Modal */}
       {showTaskIntake && (
         <TaskIntakeModal
           contacts={contacts}
           projects={projects}
           profiles={profiles}
+          isAdmin={isAdmin}
           onClose={() => { setShowTaskIntake(false); setIntakeData(undefined); }}
           onCreated={handleTaskCreated}
           initialData={intakeData}

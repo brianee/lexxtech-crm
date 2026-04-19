@@ -1,5 +1,5 @@
 export type Priority = 'low' | 'medium' | 'high' | 'critical';
-export type Status = 'pending' | 'in-progress' | 'blocked' | 'dispatched' | 'completed' | 'overdue';
+export type Status = 'pending' | 'in-progress' | 'awaiting' | 'ready' | 'failed' | 'completed' | 'overdue';
 export type RelationshipStatus = 'warm' | 'cold' | 'dormant';
 export type ProjectStatus = 'active' | 'completed' | 'archived' | 'template';
 export type InteractionType = 'call' | 'email' | 'meeting' | 'note' | 'system';
@@ -135,6 +135,7 @@ export interface Profile {
   full_name?: string | null;
   avatar_url?: string | null;
   role: Role;
+  features?: string[] | null;
   created_at: string;
 }
 
@@ -177,9 +178,13 @@ export interface BillingTransaction {
   id: string;
   user_id: string;
   project_id: string;
+  task_id?: string | null;
   description: string;
   amount: number;
   status: BillingStatus;
   date: string; // ISO date format YYYY-MM-DD
   created_at: string;
+
+  // Optional expanded relational data
+  task?: Task | null;
 }

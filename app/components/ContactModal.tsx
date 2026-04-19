@@ -40,10 +40,11 @@ const PRIORITY_CONFIG: Record<Priority, { label: string; color: string; bg: stri
 };
 
 const STATUS_CONFIG: Record<Status, { label: string; color: string }> = {
-  'pending':     { label: 'Pending',     color: 'text-tertiary' },
+  'pending':     { label: 'Pending',     color: 'text-on-surface-variant' },
   'in-progress': { label: 'In Progress', color: 'text-primary' },
-  'blocked':     { label: 'Blocked',     color: 'text-tertiary' },
-  'dispatched':  { label: 'Dispatched',  color: 'text-[#34d399]' },
+  'awaiting':    { label: 'Awaiting',    color: 'text-tertiary' },
+  'ready':       { label: 'Ready',       color: 'text-[#34d399]' },
+  'failed':      { label: 'Failed',      color: 'text-[#fb923c]' },
   'completed':   { label: 'Completed',   color: 'text-on-surface-variant' },
   'overdue':     { label: 'Overdue',     color: 'text-error' },
 };
@@ -532,12 +533,13 @@ function ProjectsTab({ contact, tasks, projects }: { contact: Contact; tasks: Ta
 
 // ─── Tab: Billing ─────────────────────────────────────────────────────────────
 
-function BillingTab({ contact, projects: initialProjects }: { contact: Contact; projects: Project[] }) {
+function BillingTab({ contact, projects: initialProjects, tasks: allTasks }: { contact: Contact; projects: Project[]; tasks: Task[] }) {
   const [projects, setProjects] = React.useState(initialProjects);
   const [addingForProject, setAddingForProject] = React.useState<string | null>(null);
   const [bLines, setBLines] = React.useState([{ desc: '', amount: '' }]);
   const [bStatus, setBStatus] = React.useState<'pending' | 'paid' | 'overdue'>('pending');
   const [bDate, setBDate] = React.useState(new Date().toISOString().split('T')[0]);
+  const [bTaskId, setBTaskId] = React.useState('');
   const [editingTxId, setEditingTxId] = React.useState<string | null>(null);
   const [editingProjectId, setEditingProjectId] = React.useState<string | null>(null);
   const [editForm, setEditForm] = React.useState<{ lines: { desc: string; amount: string }[]; status: 'pending' | 'paid' | 'overdue'; date: string }>({
@@ -545,6 +547,8 @@ function BillingTab({ contact, projects: initialProjects }: { contact: Contact; 
   });
 
   const linkedProjects = projects.filter(p => p.contact_id === contact.id);
+  // Tasks linked directly to this contact (for the task selector)
+  const contactTasks = allTasks.filter(t => t.contact_id === contact.id);
 
   const allTx = linkedProjects.flatMap(p =>
     (p.transactions ?? []).map(t => ({ ...t, projectName: p.name, projectId: p.id }))
@@ -570,10 +574,11 @@ function BillingTab({ contact, projects: initialProjects }: { contact: Contact; 
       : JSON.stringify(validLines.map(l => ({ desc: l.desc.trim(), amount: parseFloat(l.amount) })));
     const totalAmount = validLines.reduce((s, l) => s + parseFloat(l.amount), 0);
     try {
-      const newTx = await createBillingTransaction({ project_id: projectId, description, amount: totalAmount, status: bStatus, date: bDate });
+      const newTx = await createBillingTransaction({ project_id: projectId, task_id: bTaskId || null, description, amount: totalAmount, status: bStatus, date: bDate });
       patchProjectTx(projectId, txs => [newTx, ...txs]);
       setAddingForProject(null);
       setBLines([{ desc: '', amount: '' }]);
+      setBTaskId('');
       setBStatus('pending');
       setBDate(new Date().toISOString().split('T')[0]);
     } catch { alert('Failed to add transaction'); }
@@ -691,9 +696,9 @@ function BillingTab({ contact, projects: initialProjects }: { contact: Contact; 
     </div>
   </div>
   <div class="section">
-    <div class="section-label">Project</div>
+    <div class="section-label">Issued By</div>
     <div class="info-grid">
-      <div class="info-item"><p>Project Name</p><strong style="font-size:16px">${tx.projectName}</strong></div>
+      <div class="info-item"><p>Service Provider</p><strong>LexxTech</strong></div>
     </div>
   </div>
   <div class="section">
@@ -823,6 +828,25 @@ function BillingTab({ contact, projects: initialProjects }: { contact: Contact; 
                       </div>
                     ))}
                     <button type="button" onClick={() => setBLines(ls => [...ls, { desc: '', amount: '' }])} className="text-primary text-xs font-bold hover:underline">+ Add Line</button>
+
+                    {/* Link to Task */}
+                    {contactTasks.length > 0 && (
+                      <div>
+                        <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1">Link to Task <span className="normal-case font-normal opacity-60">(optional)</span></label>
+                        <select
+                          value={bTaskId}
+                          onChange={e => setBTaskId(e.target.value)}
+                          className="w-full bg-surface-container border border-outline/10 rounded-lg px-3 py-2 text-sm text-on-surface outline-none cursor-pointer [color-scheme:dark]"
+                        >
+                          <option value="">— No linked task —</option>
+                          {contactTasks.map(t => (
+                            <option key={t.id} value={t.id}>
+                              {t.registry_number ? `[${t.registry_number}] ` : ''}{t.title}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div className="flex items-center gap-3">
                       <div className="flex-1">
                         <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1">Status</label>
@@ -1117,7 +1141,7 @@ export default function ContactModal({
             <ProjectsTab contact={contact} tasks={tasks} projects={projects} />
           )}
           {activeTab === 'billing' && isAdmin && (
-            <BillingTab contact={contact} projects={projects} />
+            <BillingTab contact={contact} projects={projects} tasks={tasks} />
           )}
         </div>
 

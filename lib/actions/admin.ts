@@ -78,6 +78,19 @@ export async function updateUserRole(userId: string, newRole: Role) {
   if (error) throw error;
 }
 
+export async function updateUserFeatures(userId: string, features: string[]) {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing service role key');
+
+  const adminClient = getAdminClient();
+
+  const { error } = await adminClient
+    .from('profiles')
+    .update({ features })
+    .eq('id', userId);
+
+  if (error) throw error;
+}
+
 export async function removeUser(userId: string) {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing service role key');
 
