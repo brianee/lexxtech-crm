@@ -33,6 +33,7 @@ export interface Task {
   due_date?: string | null;
   priority: Priority;
   status: Status;
+  urgent?: boolean;
   created_at: string;
   updated_at: string;
 
