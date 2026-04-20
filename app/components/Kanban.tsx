@@ -689,10 +689,7 @@ export default function Kanban({
   isAdmin?: boolean;
 }) {
   const [tasks, setTasks] = React.useState<Task[]>(initialTasks);
-  const [layoutMode, setLayoutMode] = React.useState<'board' | 'list'>(() => {
-    if (typeof window !== 'undefined') return (localStorage.getItem('views_layoutMode') as 'board' | 'list') ?? 'board';
-    return 'board';
-  });
+  const [layoutMode, setLayoutMode] = React.useState<'board' | 'list'>('board');
   const [view, setView] = React.useState<'status' | 'project'>('status');
   const [projectFilter, setProjectFilter] = React.useState<string>('all');
   const [priorityFilter, setPriorityFilter] = React.useState<Priority | 'all'>('all');
@@ -705,8 +702,10 @@ export default function Kanban({
   };
 
   React.useEffect(() => {
-    const stored = localStorage.getItem('kanban_assignedOnly');
-    if (stored !== null) setAssignedOnly(stored === 'true');
+    const storedAssigned = localStorage.getItem('kanban_assignedOnly');
+    if (storedAssigned !== null) setAssignedOnly(storedAssigned === 'true');
+    const storedLayout = localStorage.getItem('views_layoutMode') as 'board' | 'list';
+    if (storedLayout === 'board' || storedLayout === 'list') setLayoutMode(storedLayout);
   }, []);
   const [activeTask, setActiveTask] = React.useState<Task | null>(null);
   const [selectedTask, setSelectedTask] = React.useState<Task | null>(null);
