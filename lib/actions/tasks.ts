@@ -74,7 +74,7 @@ export async function createTask(taskData: Partial<Task>) {
 
   const newTask = data as Task;
   if (newTask.assigned_to && newTask.assigned_to !== user.id) {
-    createNotification({
+    await createNotification({
       userId: newTask.assigned_to,
       actorId: user.id,
       title: 'New Task Assigned',
@@ -82,7 +82,7 @@ export async function createTask(taskData: Partial<Task>) {
       type: 'assignment',
       entityType: 'task',
       entityId: newTask.id,
-    }).catch(console.error);
+    });
   }
 
   revalidatePath('/tasks');
@@ -142,7 +142,7 @@ export async function updateTask(id: string, updates: Partial<Task>) {
 
   // Hook for assigned_to changes
   if (updates.assigned_to && updates.assigned_to !== oldTask.assigned_to && updates.assigned_to !== user.id) {
-    createNotification({
+    await createNotification({
       userId: updates.assigned_to,
       actorId: user.id,
       title: 'Task Reassigned',
@@ -150,7 +150,7 @@ export async function updateTask(id: string, updates: Partial<Task>) {
       type: 'assignment',
       entityType: 'task',
       entityId: taskData.id,
-    }).catch(console.error);
+    });
   }
 
   revalidatePath('/tasks');
@@ -229,7 +229,7 @@ export async function addTaskInteraction(taskId: string, content: string): Promi
   if (taskData) {
     // Notify creator
     if (taskData.user_id !== user.id) {
-      createNotification({
+      await createNotification({
         userId: taskData.user_id,
         actorId: user.id,
         title: 'New Comment',
@@ -237,11 +237,11 @@ export async function addTaskInteraction(taskId: string, content: string): Promi
         type: 'comment',
         entityType: 'task',
         entityId: taskId,
-      }).catch(console.error);
+      });
     }
     // Notify assignee if different from creator and different from commenter
     if (taskData.assigned_to && taskData.assigned_to !== user.id && taskData.assigned_to !== taskData.user_id) {
-      createNotification({
+      await createNotification({
         userId: taskData.assigned_to,
         actorId: user.id,
         title: 'New Comment',
@@ -249,7 +249,7 @@ export async function addTaskInteraction(taskId: string, content: string): Promi
         type: 'comment',
         entityType: 'task',
         entityId: taskId,
-      }).catch(console.error);
+      });
     }
   }
 
@@ -383,22 +383,23 @@ export async function advanceTaskStage(
   if (error) throw new Error(error.message);
 
   // Auto-log a system interaction for full audit trail
-  supabase.from('task_interactions').insert([{
+  await supabase.from('task_interactions').insert([{
     task_id: taskId,
     user_id: user.id,
     content: `⚡ ${log}`,
-  }]).then(() => {}, console.error);
+  }]);
 
   // Completion cascades
   if (next === 'completed') {
     const projectId = updatedTask.project_id || task.project_id;
-    if (projectId) recalculateProjectProgress(projectId).catch(console.error);
+    if (projectId) await recalculateProjectProgress(projectId);
     const contactId = updatedTask.contact_id || task.contact_id;
-    if (contactId) recordContactInteraction(contactId).catch(console.error);
+    if (contactId) await recordContactInteraction(contactId);
   }
 
   revalidatePath('/tasks');
   revalidatePath('/dashboard');
   revalidatePath('/kanban');
+  revalidatePath('/views');
   return updatedTask as Task;
 }
