@@ -178,7 +178,8 @@ export interface ContactInteraction {
 export interface BillingTransaction {
   id: string;
   user_id: string;
-  project_id: string;
+  project_id?: string | null;
+  contact_id?: string | null;
   task_id?: string | null;
   description: string;
   amount: number;

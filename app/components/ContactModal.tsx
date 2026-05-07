@@ -20,7 +20,7 @@ import {
   getContactInteractions,
 } from '@/lib/actions/contacts';
 import { createTask } from '@/lib/actions/tasks';
-import { createBillingTransaction, updateBillingTransaction, deleteBillingTransaction } from '@/lib/actions/billing';
+import { createBillingTransaction, updateBillingTransaction, deleteBillingTransaction, getContactBillingTransactions } from '@/lib/actions/billing';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -535,7 +535,10 @@ function ProjectsTab({ contact, tasks, projects }: { contact: Contact; tasks: Ta
 
 function BillingTab({ contact, projects: initialProjects, tasks: allTasks }: { contact: Contact; projects: Project[]; tasks: Task[] }) {
   const [projects, setProjects] = React.useState(initialProjects);
+  // Standalone transactions (no project, direct to contact)
+  const [standaloneTx, setStandaloneTx] = React.useState<(BillingTransaction & { projectName: string; projectId: string | null })[]>([]);
   const [addingForProject, setAddingForProject] = React.useState<string | null>(null);
+  const [addingStandalone, setAddingStandalone] = React.useState(false);
   const [bLines, setBLines] = React.useState([{ desc: '', amount: '' }]);
   const [bStatus, setBStatus] = React.useState<'pending' | 'paid' | 'overdue'>('pending');
   const [bDate, setBDate] = React.useState(new Date().toISOString().split('T')[0]);
@@ -547,12 +550,19 @@ function BillingTab({ contact, projects: initialProjects, tasks: allTasks }: { c
   });
 
   const linkedProjects = projects.filter(p => p.contact_id === contact.id);
-  // Tasks linked directly to this contact (for the task selector)
   const contactTasks = allTasks.filter(t => t.contact_id === contact.id);
 
-  const allTx = linkedProjects.flatMap(p =>
-    (p.transactions ?? []).map(t => ({ ...t, projectName: p.name, projectId: p.id }))
-  ).sort((a, b) => b.date.localeCompare(a.date));
+  // Load standalone (no-project) transactions on mount
+  React.useEffect(() => {
+    getContactBillingTransactions(contact.id).then(txs => {
+      setStandaloneTx(txs.map(t => ({ ...t, projectName: 'Direct Billing', projectId: null })));
+    });
+  }, [contact.id]);
+
+  const projectTx = linkedProjects.flatMap(p =>
+    (p.transactions ?? []).map(t => ({ ...t, projectName: p.name, projectId: p.id as string | null }))
+  );
+  const allTx = [...projectTx, ...standaloneTx].sort((a, b) => b.date.localeCompare(a.date));
 
   const totalBilled  = allTx.reduce((s, t) => s + Number(t.amount), 0);
   const totalPaid    = allTx.filter(t => t.status === 'paid').reduce((s, t) => s + Number(t.amount), 0);
@@ -563,6 +573,13 @@ function BillingTab({ contact, projects: initialProjects, tasks: allTasks }: { c
     setProjects(prev => prev.map(p =>
       p.id === projectId ? { ...p, transactions: updater(p.transactions ?? []) } : p
     ));
+  };
+
+  const resetBForm = () => {
+    setBLines([{ desc: '', amount: '' }]);
+    setBTaskId('');
+    setBStatus('pending');
+    setBDate(new Date().toISOString().split('T')[0]);
   };
 
   const handleAdd = async (e: React.FormEvent, projectId: string) => {
@@ -577,31 +594,52 @@ function BillingTab({ contact, projects: initialProjects, tasks: allTasks }: { c
       const newTx = await createBillingTransaction({ project_id: projectId, task_id: bTaskId || null, description, amount: totalAmount, status: bStatus, date: bDate });
       patchProjectTx(projectId, txs => [newTx, ...txs]);
       setAddingForProject(null);
-      setBLines([{ desc: '', amount: '' }]);
-      setBTaskId('');
-      setBStatus('pending');
-      setBDate(new Date().toISOString().split('T')[0]);
-    } catch { alert('Failed to add transaction'); }
+      resetBForm();
+    } catch (err) { alert('Failed to add transaction: ' + (err instanceof Error ? err.message : String(err))); }
   };
 
-  const handleToggleStatus = async (tx: BillingTransaction & { projectId: string }) => {
+  const handleAddStandalone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const validLines = bLines.filter(l => l.desc.trim() && parseFloat(l.amount) > 0);
+    if (validLines.length === 0) return;
+    const description = validLines.length === 1
+      ? validLines[0].desc.trim()
+      : JSON.stringify(validLines.map(l => ({ desc: l.desc.trim(), amount: parseFloat(l.amount) })));
+    const totalAmount = validLines.reduce((s, l) => s + parseFloat(l.amount), 0);
+    try {
+      const newTx = await createBillingTransaction({ project_id: null, contact_id: contact.id, task_id: bTaskId || null, description, amount: totalAmount, status: bStatus, date: bDate });
+      setStandaloneTx(prev => [{ ...newTx, projectName: 'Direct Billing', projectId: null }, ...prev]);
+      setAddingStandalone(false);
+      resetBForm();
+    } catch (err) { alert('Failed to add transaction: ' + (err instanceof Error ? err.message : String(err))); }
+  };
+
+  const handleToggleStatus = async (tx: BillingTransaction & { projectId: string | null }) => {
     const cycle: Record<string, 'pending' | 'paid' | 'overdue'> = { pending: 'paid', paid: 'overdue', overdue: 'pending' };
     const newStatus = cycle[tx.status];
     try {
       await updateBillingTransaction(tx.id, { status: newStatus });
-      patchProjectTx(tx.projectId, txs => txs.map(t => t.id === tx.id ? { ...t, status: newStatus } : t));
-    } catch { alert('Failed to update status'); }
+      if (tx.projectId) {
+        patchProjectTx(tx.projectId, txs => txs.map(t => t.id === tx.id ? { ...t, status: newStatus } : t));
+      } else {
+        setStandaloneTx(prev => prev.map(t => t.id === tx.id ? { ...t, status: newStatus } : t));
+      }
+    } catch (err) { alert('Failed to update status: ' + (err instanceof Error ? err.message : String(err))); }
   };
 
-  const handleDelete = async (tx: BillingTransaction & { projectId: string }) => {
+  const handleDelete = async (tx: BillingTransaction & { projectId: string | null }) => {
     if (!confirm('Delete this transaction?')) return;
     try {
       await deleteBillingTransaction(tx.id);
-      patchProjectTx(tx.projectId, txs => txs.filter(t => t.id !== tx.id));
-    } catch { alert('Failed to delete'); }
+      if (tx.projectId) {
+        patchProjectTx(tx.projectId, txs => txs.filter(t => t.id !== tx.id));
+      } else {
+        setStandaloneTx(prev => prev.filter(t => t.id !== tx.id));
+      }
+    } catch (err) { alert('Failed to delete: ' + (err instanceof Error ? err.message : String(err))); }
   };
 
-  const startEdit = (tx: BillingTransaction & { projectId: string }) => {
+  const startEdit = (tx: BillingTransaction & { projectId: string | null }) => {
     let lines: { desc: string; amount: string }[];
     try {
       const parsed = JSON.parse(tx.description) as { desc: string; amount: number }[];
@@ -613,7 +651,7 @@ function BillingTab({ contact, projects: initialProjects, tasks: allTasks }: { c
   };
 
   const handleSaveEdit = async () => {
-    if (!editingTxId || !editingProjectId) return;
+    if (!editingTxId) return;
     const validLines = editForm.lines.filter(l => l.desc.trim());
     if (validLines.length === 0) return;
     const description = validLines.length === 1
@@ -623,9 +661,13 @@ function BillingTab({ contact, projects: initialProjects, tasks: allTasks }: { c
     const updates = { description, amount, status: editForm.status, date: editForm.date };
     try {
       await updateBillingTransaction(editingTxId, updates);
-      patchProjectTx(editingProjectId, txs => txs.map(t => t.id === editingTxId ? { ...t, ...updates } : t));
+      if (editingProjectId) {
+        patchProjectTx(editingProjectId, txs => txs.map(t => t.id === editingTxId ? { ...t, ...updates } : t));
+      } else {
+        setStandaloneTx(prev => prev.map(t => t.id === editingTxId ? { ...t, ...updates } : t));
+      }
       setEditingTxId(null);
-    } catch { alert('Failed to save changes'); }
+    } catch (err) { alert('Failed to save changes: ' + (err instanceof Error ? err.message : String(err))); }
   };
 
   const handleDownloadReceipt = (tx: BillingTransaction & { projectName: string }) => {
@@ -775,16 +817,96 @@ function BillingTab({ contact, projects: initialProjects, tasks: allTasks }: { c
         </div>
       )}
 
-      {/* Per-project sections */}
+      {/* Per-project + standalone sections */}
       <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4">
-        {linkedProjects.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-3">
-            <CreditCard size={32} className="text-on-surface-variant opacity-20" />
-            <p className="text-sm font-medium text-on-surface-variant opacity-50 text-center">
-              No projects linked to this contact yet.
-            </p>
+        {/* Standalone (no-project) billing card */}
+        <div className="bg-surface-container rounded-2xl border border-outline/10 overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-outline/10 bg-surface-container-lowest">
+            <div>
+              <p className="text-[13px] font-extrabold text-on-surface">Direct Billing</p>
+              <p className="text-[10px] font-bold text-on-surface-variant opacity-50">Not tied to a project</p>
+            </div>
+            <button
+              onClick={() => { setAddingStandalone(v => !v); resetBForm(); }}
+              className="text-primary text-[11px] font-bold uppercase tracking-widest hover:underline"
+            >
+              {addingStandalone ? 'Cancel' : '+ Add Record'}
+            </button>
           </div>
-        ) : (
+          {addingStandalone && (
+            <form onSubmit={handleAddStandalone} className="p-4 border-b border-outline/10 space-y-3 bg-surface-container-low">
+              <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block">Line Items</label>
+              {bLines.map((line, idx) => (
+                <div key={idx} className="flex gap-2 items-center">
+                  <input required value={line.desc}
+                    onChange={e => setBLines(ls => ls.map((l, i) => i === idx ? { ...l, desc: e.target.value } : l))}
+                    className="flex-1 bg-surface-container border border-outline/10 rounded-lg px-3 py-2 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary/40"
+                    placeholder={`Description ${idx + 1}`} />
+                  <input required type="number" step="0.01" min="0" value={line.amount}
+                    onChange={e => setBLines(ls => ls.map((l, i) => i === idx ? { ...l, amount: e.target.value } : l))}
+                    className="w-28 bg-surface-container border border-outline/10 rounded-lg px-3 py-2 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary/40"
+                    placeholder="0.00" />
+                  {bLines.length > 1 && (
+                    <button type="button" onClick={() => setBLines(ls => ls.filter((_, i) => i !== idx))} className="p-1.5 text-on-surface-variant hover:text-error transition-colors"><X size={13} /></button>
+                  )}
+                </div>
+              ))}
+              <button type="button" onClick={() => setBLines(ls => [...ls, { desc: '', amount: '' }])} className="text-primary text-xs font-bold hover:underline">+ Add Line</button>
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1">Status</label>
+                  <select value={bStatus} onChange={e => setBStatus(e.target.value as any)} className="w-full bg-surface-container border border-outline/10 rounded-lg px-3 py-2 text-sm text-on-surface outline-none cursor-pointer">
+                    <option value="pending">Pending</option>
+                    <option value="paid">Paid</option>
+                    <option value="overdue">Overdue</option>
+                  </select>
+                </div>
+                <div className="flex-1">
+                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1">Date</label>
+                  <input required type="date" value={bDate} onChange={e => setBDate(e.target.value)} className="w-full bg-surface-container border border-outline/10 rounded-lg px-3 py-2 text-sm text-on-surface outline-none [color-scheme:dark]" />
+                </div>
+                <div className="shrink-0 pt-5">
+                  <p className="text-[9px] font-bold text-on-surface-variant uppercase tracking-widest">Total</p>
+                  <p className="font-black text-on-surface">₱{bLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0).toFixed(2)}</p>
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <button type="submit" className="px-5 py-2 bg-primary text-on-primary font-bold text-xs rounded-lg uppercase tracking-wide hover:bg-primary-dim transition-all">Save Transaction</button>
+              </div>
+            </form>
+          )}
+          <div className="divide-y divide-outline/5">
+            {standaloneTx.length === 0 ? (
+              <p className="text-center text-[11px] text-on-surface-variant opacity-40 py-5 font-medium">No direct transactions yet</p>
+            ) : (
+              standaloneTx.map(tx => {
+                const txM = { ...tx, projectId: null as string | null, projectName: 'Direct Billing' };
+                const icon = tx.status === 'paid' ? <CheckCircle2 size={15} /> : tx.status === 'overdue' ? <AlertCircle size={15} /> : <Circle size={15} />;
+                const sc = tx.status === 'paid' ? 'bg-primary/10 border-primary/20 text-primary' : tx.status === 'overdue' ? 'bg-error/10 border-error/20 text-error' : 'bg-surface-container-high border-outline/10 text-on-surface-variant';
+                let desc: React.ReactNode;
+                try { const items = JSON.parse(tx.description) as { desc: string; amount: number }[]; desc = <div className="space-y-0.5">{items.map((l, i) => <p key={i} className="text-sm text-on-surface"><span className="font-bold">{l.desc}</span> <span className="text-on-surface-variant font-medium">₱{l.amount.toFixed(2)}</span></p>)}</div>; }
+                catch { desc = <p className="font-bold text-on-surface text-sm">{tx.description}</p>; }
+                return (
+                  <div key={tx.id} className="flex items-center gap-3 px-5 py-4 hover:bg-surface-container-low transition-colors group">
+                    <button onClick={() => handleToggleStatus(txM)} className={cn('w-9 h-9 rounded-full flex items-center justify-center shrink-0 border transition-transform hover:scale-110 active:scale-95', sc)}>{icon}</button>
+                    <div className="flex-1 min-w-0">{desc}<p className="text-[10px] text-on-surface-variant mt-0.5">{new Date(tx.date).toLocaleDateString()} · <span className="capitalize font-semibold">{tx.status}</span></p></div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className={cn('font-black text-base', tx.status === 'paid' ? 'text-primary' : tx.status === 'overdue' ? 'text-error' : 'text-on-surface')}>₱{Number(tx.amount).toFixed(2)}</span>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {tx.status === 'paid' && <button onClick={() => handleDownloadReceipt({ ...tx, projectName: 'Direct Billing' })} className="p-1.5 text-primary hover:bg-primary/10 rounded-lg transition-colors"><Receipt size={13} /></button>}
+                        <button onClick={() => startEdit(txM)} className="p-1.5 text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-lg transition-colors"><FileText size={13} /></button>
+                        <button onClick={() => handleDelete(txM)} className="p-1.5 text-on-surface-variant hover:text-error hover:bg-error/5 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Per-project sections */}
+        {linkedProjects.length > 0 && (
           linkedProjects.map(project => {
             const txs = (project.transactions ?? []).slice().sort((a, b) => b.date.localeCompare(a.date));
             const isAdding = addingForProject === project.id;
@@ -876,7 +998,7 @@ function BillingTab({ contact, projects: initialProjects, tasks: allTasks }: { c
                     <p className="text-center text-[11px] text-on-surface-variant opacity-40 py-5 font-medium">No transactions yet</p>
                   ) : (
                     txs.map(tx => {
-                      const txM = { ...tx, projectId: project.id, projectName: project.name };
+                      const txM = { ...tx, projectId: project.id as string | null, projectName: project.name };
                       const icon = tx.status === 'paid' ? <CheckCircle2 size={15} /> : tx.status === 'overdue' ? <AlertCircle size={15} /> : <Circle size={15} />;
                       const sc = tx.status === 'paid' ? 'bg-primary/10 border-primary/20 text-primary' : tx.status === 'overdue' ? 'bg-error/10 border-error/20 text-error' : 'bg-surface-container-high border-outline/10 text-on-surface-variant';
                       let desc: React.ReactNode;
