@@ -4,6 +4,25 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import type { BillingTransaction } from '@/lib/types';
 
+export async function getContactBillingTransactions(contactId: string): Promise<BillingTransaction[]> {
+  const supabase = await createClient();
+  const { data: userData } = await supabase.auth.getUser();
+  if (!userData?.user) return [];
+
+  const { data, error } = await supabase
+    .from('billing_transactions')
+    .select('*')
+    .eq('contact_id', contactId)
+    .is('project_id', null)
+    .order('date', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching contact billing transactions:', error);
+    return [];
+  }
+  return (data ?? []) as BillingTransaction[];
+}
+
 export async function createBillingTransaction(data: Omit<BillingTransaction, 'id' | 'user_id' | 'created_at'>) {
   const supabase = await createClient();
   const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -24,9 +43,10 @@ export async function createBillingTransaction(data: Omit<BillingTransaction, 'i
 
   if (error) {
     console.error('Error creating transaction:', error);
-    throw new Error('Failed to create transaction');
+    throw new Error(error.message || 'Failed to create transaction');
   }
 
+  revalidatePath('/contacts');
   revalidatePath('/projects');
   return transaction as BillingTransaction;
 }

@@ -489,7 +489,7 @@ function ContactCard({
       </div>
 
       {/* Action buttons */}
-      <div className="mt-auto grid grid-cols-3 gap-3" onClick={(e) => e.stopPropagation()}>
+      <div className="mt-auto grid grid-cols-2 gap-3" onClick={(e) => e.stopPropagation()}>
         <a
           href={contact.email ? `mailto:${contact.email}` : undefined}
           className={cn(
@@ -502,15 +502,6 @@ function ContactCard({
             Email
           </span>
         </a>
-        <button className="flex flex-col items-center justify-center gap-2 py-4 bg-surface-container rounded-2xl border border-outline/10 hover:border-primary/40 hover:bg-primary/5 transition-all group/btn">
-          <MessageSquare
-            size={17}
-            className="text-on-surface-variant group-hover/btn:text-primary transition-colors"
-          />
-          <span className="text-[9px] font-black text-on-surface-variant uppercase tracking-widest group-hover/btn:text-primary">
-            Chat
-          </span>
-        </button>
         <a
           href={contact.phone ? `tel:${contact.phone}` : undefined}
           className={cn(
